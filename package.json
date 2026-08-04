@@ -34,12 +34,16 @@
       "assets/icon-512.png"
     ],
     "mac": {
-      "target": "dir",
+      "target": [
+        { "target": "zip", "arch": ["arm64"] },
+        { "target": "dmg", "arch": ["arm64"] }
+      ],
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",
       "identity": null,
       "hardenedRuntime": false
-    }
+    },
+    "publish": { "provider": "github", "owner": "karanb192", "repo": "hindcast" }
   },
   "devDependencies": {
     "dompurify": "^3.1.6",
