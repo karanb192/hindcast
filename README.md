@@ -15,6 +15,10 @@
   <img src="assets/screenshots/session-dark.png" alt="A Claude Code session on the Hindcast tape" width="900">
 </p>
 
+<p align="center">
+  <a href="https://github.com/karanb192/hindcast/releases/download/v0.1.0/hindcast-explainer.mp4">▶&nbsp;&nbsp;watch the 30-second film</a>
+</p>
+
 A Mac desktop app that reads the transcripts Claude Code already writes to
 `~/.claude/projects/` and turns them into a browsable archive: a home view with
 your stats (tokens, tools, models, cadence heatmap), full-text search across
@@ -27,13 +31,29 @@ It is designed to stay within Anthropic's Terms of Service and to be safe with
 any Claude Code subscription, unlike interactive wrapper tools affected by the
 April 2026 restriction on Agent SDK chat with subscription accounts.
 
-## Run it
-
-Requires Node 18+ and [ripgrep](https://github.com/BurntSushi/ripgrep) —
-without `rg`, full-text search quietly falls back to title-only matching.
+## Install
 
 ```bash
-brew install ripgrep
+brew tap karanb192/tap
+brew trust karanb192/tap
+brew install --cask hindcast
+xattr -rd com.apple.quarantine /Applications/Hindcast.app   # until we're notarized
+```
+
+Apple Silicon only for now. The `xattr` step is needed because the app isn't
+notarized yet (Developer ID in progress); it disappears in an upcoming signed
+release. Prefer a download? Grab the DMG from
+[Releases](https://github.com/karanb192/hindcast/releases).
+
+You'll also want [ripgrep](https://github.com/BurntSushi/ripgrep) —
+without `rg`, full-text search quietly falls back to title-only matching:
+`brew install ripgrep`.
+
+## Run from source
+
+Requires Node 18+:
+
+```bash
 git clone https://github.com/karanb192/hindcast.git
 cd hindcast
 npm install
