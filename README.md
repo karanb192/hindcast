@@ -15,7 +15,6 @@
   <img src="assets/screenshots/session-dark.png" alt="A Claude Code session on the Hindcast tape" width="900">
 </p>
 
-https://github.com/user-attachments/assets/80c5f6c9-7117-465e-886e-5626873f99c2
 
 A Mac desktop app that reads the transcripts Claude Code already writes to
 `~/.claude/projects/` and turns them into a browsable archive: a home view with
@@ -28,6 +27,10 @@ sends messages, never drives sessions, and never touches the API or Agent SDK.
 It is designed to stay within Anthropic's Terms of Service and to be safe with
 any Claude Code subscription, unlike interactive wrapper tools affected by the
 April 2026 restriction on Agent SDK chat with subscription accounts.
+
+## The 30-second film
+
+https://github.com/user-attachments/assets/80c5f6c9-7117-465e-886e-5626873f99c2
 
 ## Install
 
