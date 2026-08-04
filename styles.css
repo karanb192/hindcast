@@ -141,6 +141,29 @@ body {
 .rail-fixed { padding: 0 10px; }
 .rail-list { overflow-y: auto; flex: 1; min-height: 0; padding: 0 10px 16px; }
 
+.rail-filter {
+  width: 100%;
+  margin: 0 0 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 9px;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 11.5px;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+.rail-filter::placeholder { color: var(--putty-dim); }
+.rail-filter:focus { border-color: var(--brass-dim); }
+
+.rail-empty {
+  padding: 6px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--putty-dim);
+}
+
 .rail-section {
   font-family: var(--mono);
   font-size: 9.5px;
@@ -324,6 +347,10 @@ body {
   border-radius: 8px;
   cursor: default;
   border: 1px solid transparent;
+  /* Off-screen cards skip layout and paint; the estimate only needs to be
+     in the right ballpark for the scrollbar to feel honest. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 62px;
 }
 .session-card:hover { background: var(--bg-hover); }
 .session-card.active {

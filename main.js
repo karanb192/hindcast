@@ -28,17 +28,32 @@ function saveCache(cache) {
   } catch {}
 }
 
+let firstIndexDone = false;
+let lastIndexSig = null;
+
 async function refreshIndex() {
   if (indexing) return;
   indexing = true;
   const cache = loadCache();
   try {
+    // Watch-triggered rescans are mtime-cached and near-instant; progress
+    // flicker is only worth showing while the first full index streams.
+    const showProgress = !firstIndexDone;
     index = await buildIndex(cache, (p) => {
-      if (win && !win.isDestroyed()) win.webContents.send('index:progress', p);
+      if (showProgress && win && !win.isDestroyed()) win.webContents.send('index:progress', p);
     });
     sessionsById = new Map(index.sessions.map((s) => [s.id, s]));
     saveCache(cache);
-    if (win && !win.isDestroyed()) win.webContents.send('index:ready');
+    // Active Claude Code sessions fire the watcher constantly; when a rescan
+    // produces an identical index, skip the ready ping so the renderer
+    // doesn't reload and re-render the whole app for nothing.
+    const sig = JSON.stringify(index);
+    const changed = sig !== lastIndexSig;
+    lastIndexSig = sig;
+    if ((changed || !firstIndexDone) && win && !win.isDestroyed()) {
+      win.webContents.send('index:ready');
+    }
+    firstIndexDone = true;
   } finally {
     indexing = false;
   }
