@@ -15,9 +15,7 @@
   <img src="assets/screenshots/session-dark.png" alt="A Claude Code session on the Hindcast tape" width="900">
 </p>
 
-<p align="center">
-  <a href="https://github.com/karanb192/hindcast/releases/download/v0.1.0/hindcast-explainer.mp4">▶&nbsp;&nbsp;watch the 30-second film</a>
-</p>
+https://github.com/user-attachments/assets/80c5f6c9-7117-465e-886e-5626873f99c2
 
 A Mac desktop app that reads the transcripts Claude Code already writes to
 `~/.claude/projects/` and turns them into a browsable archive: a home view with
