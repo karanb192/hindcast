@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <title>Hindcast — Filmstrip Monogram (mark)</title>
+  <!-- Single-color monogram: the H crossbar is a strip of film with punched frames.
+       At favicon size the perforations close up and it stays a clean H.
+       Ink adapts to ground; works as pure monochrome in any single color. -->
+  <style>
+    .ink { fill: #26211A; }
+    @media (prefers-color-scheme: dark) { .ink { fill: #E8E2D6; } }
+  </style>
+  <path class="ink" fill-rule="nonzero" d="
+    M12 14H36V17H30V83H36V86H12V83H18V17H12Z
+    M64 14H88V17H82V83H88V86H64V83H70V17H64Z
+    M29 44H71V56H29Z
+    M38 48v4h4v-4Z
+    M48 48v4h4v-4Z
+    M58 48v4h4v-4Z"/>
+</svg>

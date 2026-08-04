@@ -1,0 +1,25 @@
+# Dependencies & build output
+node_modules/
+out/
+dist/
+build/
+
+# Private project instructions — never publish
+CLAUDE.md
+
+# Brainstorming / analysis HTML (kept local, not shipped)
+brainstorm/
+docs/
+
+# Large media (host on the landing page / a GitHub release instead)
+assets/*.mp4
+
+# Local caches / exports / scratch
+*.log
+.DS_Store
+Hindcast Exports/
+scratchpad/
+
+# Editor
+.vscode/
+.idea/

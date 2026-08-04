@@ -1,0 +1,56 @@
+{
+  "name": "hindcast",
+  "version": "0.1.0",
+  "description": "Browse, search, and replay every Claude Code session on your Mac. A local-first session viewer, timeline scrubber, and cost tracker.",
+  "author": "Karan Bansal",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karanb192/hindcast.git"
+  },
+  "homepage": "https://github.com/karanb192/hindcast#readme",
+  "main": "main.js",
+  "scripts": {
+    "build": "esbuild src/renderer.jsx --bundle --outfile=out/renderer.js --jsx=automatic --loader:.js=jsx",
+    "start": "npm run build && electron .",
+    "dev": "electron .",
+    "pack": "npm run build && electron-builder --mac --dir",
+    "dist": "npm run build && electron-builder --mac"
+  },
+  "build": {
+    "appId": "in.karanbansal.hindcast",
+    "productName": "Hindcast",
+    "copyright": "Copyright © 2026 Karan Bansal",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "styles.css",
+      "out/**/*",
+      "lib/**/*",
+      "assets/icon-512.png"
+    ],
+    "mac": {
+      "target": "dir",
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false
+    }
+  },
+  "devDependencies": {
+    "dompurify": "^3.1.6",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "playwright-core": "^1.61.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "dependencies": {
+    "marked": "^14.1.2"
+  }
+}

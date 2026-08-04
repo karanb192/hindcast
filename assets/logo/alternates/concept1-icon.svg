@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Hindcast — Archive Reel (app icon)</title>
+  <!-- Concept 1: brass film reel struck as an archival seal, on darkroom ground -->
+  <defs>
+    <radialGradient id="ground" cx="50%" cy="38%" r="80%">
+      <stop offset="0" stop-color="#1B1712"/>
+      <stop offset="1" stop-color="#141210"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="180" fill="url(#ground)"/>
+  <g transform="translate(512,512) scale(6.4)">
+    <path fill="#C9A96A" fill-rule="evenodd" d="
+      M-42 0a42 42 0 1 0 84 0a42 42 0 1 0 -84 0Z
+      M-6.5 0a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0 -13 0Z
+      M-11.5 -23a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z
+      M8.42 11.5a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z
+      M-31.42 11.5a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z"/>
+  </g>
+</svg>

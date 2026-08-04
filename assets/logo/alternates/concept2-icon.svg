@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Hindcast — Filmstrip Monogram (app icon)</title>
+  <!-- Concept 2: slab-serif H whose crossbar is a perforated strip of film.
+       Ink letterform on warm paper ground, brass crossbar. -->
+  <defs>
+    <radialGradient id="ground" cx="50%" cy="35%" r="85%">
+      <stop offset="0" stop-color="#F6F2E8"/>
+      <stop offset="1" stop-color="#EFE9DB"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="180" fill="url(#ground)"/>
+  <g transform="translate(512,512) scale(7) translate(-50,-50)">
+    <!-- stems with hairline serifs, in ink -->
+    <path fill="#26211A" d="
+      M12 14H36V17H30V83H36V86H12V83H18V17H12Z
+      M64 14H88V17H82V83H88V86H64V83H70V17H64Z"/>
+    <!-- filmstrip crossbar in brass, three punched frames -->
+    <path fill="#8F7132" fill-rule="nonzero" d="
+      M29 44H71V56H29Z
+      M38 48v4h4v-4Z
+      M48 48v4h4v-4Z
+      M58 48v4h4v-4Z"/>
+  </g>
+</svg>

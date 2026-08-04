@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-52 -52 104 104">
+  <title>Hindcast — The Spool (mark)</title>
+  <!-- Single-color spool: tape lead feeding into a coil that resolves to the
+       origin dot (the ◉ evolved). Brass adapts to ground: #8F7132 on paper,
+       #C9A96A on dark. Monochrome-friendly. -->
+  <style>
+    .brass-line { stroke: #8F7132; }
+    .brass-fill { fill: #8F7132; }
+    @media (prefers-color-scheme: dark) {
+      .brass-line { stroke: #C9A96A; }
+      .brass-fill { fill: #C9A96A; }
+    }
+  </style>
+  <path class="brass-line" fill="none" stroke-width="6" stroke-linecap="round" d="
+    M48 40H0
+    A33.5 33.5 0 0 1 0 -27
+    A22.5 22.5 0 0 1 0 18
+    A15 15 0 0 1 0 -12"/>
+  <circle class="brass-fill" r="5.5"/>
+</svg>

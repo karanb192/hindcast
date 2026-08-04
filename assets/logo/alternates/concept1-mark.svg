@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100">
+  <title>Hindcast — Archive Reel (mark)</title>
+  <!-- Single-color mark. Brass adapts to ground: #8F7132 on paper, #C9A96A on dark.
+       Monochrome-friendly: swap the fill for any single ink and it holds. -->
+  <style>
+    .brass { fill: #8F7132; }
+    @media (prefers-color-scheme: dark) { .brass { fill: #C9A96A; } }
+  </style>
+  <path class="brass" fill-rule="evenodd" d="
+    M-42 0a42 42 0 1 0 84 0a42 42 0 1 0 -84 0Z
+    M-6.5 0a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0 -13 0Z
+    M-11.5 -23a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z
+    M8.42 11.5a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z
+    M-31.42 11.5a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z"/>
+</svg>

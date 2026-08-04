@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 156">
+  <title>Hindcast — Archive Reel (wordmark)</title>
+  <!-- Brass reel + high-contrast serif. Colors adapt: ink #26211A / brass #8F7132 on paper,
+       ink #E8E2D6 / brass #C9A96A on darkroom ground. -->
+  <style>
+    .brass { fill: #8F7132; }
+    .ink   { fill: #26211A; }
+    @media (prefers-color-scheme: dark) {
+      .brass { fill: #C9A96A; }
+      .ink   { fill: #E8E2D6; }
+    }
+  </style>
+  <g transform="translate(60,78) scale(0.857)">
+    <path class="brass" fill-rule="evenodd" d="
+      M-42 0a42 42 0 1 0 84 0a42 42 0 1 0 -84 0Z
+      M-6.5 0a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0 -13 0Z
+      M-11.5 -23a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z
+      M8.42 11.5a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z
+      M-31.42 11.5a11.5 11.5 0 1 0 23 0a11.5 11.5 0 1 0 -23 0Z"/>
+  </g>
+  <text class="ink" x="124" y="108" font-family="Georgia, 'Times New Roman', serif"
+        font-size="88" letter-spacing="-1">Hindcast</text>
+</svg>

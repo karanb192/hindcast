@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Hindcast — The Spool (app icon)</title>
+  <!-- Concept 3: a spool of tape winding back to its origin point, with the
+       tape lead feeding out. Rewind, the tape, and the archive in one gesture. -->
+  <defs>
+    <radialGradient id="ground" cx="50%" cy="38%" r="80%">
+      <stop offset="0" stop-color="#1B1712"/>
+      <stop offset="1" stop-color="#141210"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="180" fill="url(#ground)"/>
+  <g transform="translate(512,512) scale(6.8) translate(-7.25,-6.5)">
+    <path fill="none" stroke="#C9A96A" stroke-width="6" stroke-linecap="round" d="
+      M48 40H0
+      A33.5 33.5 0 0 1 0 -27
+      A22.5 22.5 0 0 1 0 18
+      A15 15 0 0 1 0 -12"/>
+    <circle r="5.5" fill="#C9A96A"/>
+  </g>
+</svg>

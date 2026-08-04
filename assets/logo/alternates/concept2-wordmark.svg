@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 156">
+  <title>Hindcast — Filmstrip Monogram (wordmark)</title>
+  <!-- The monogram IS the initial: brass filmstrip-H leads straight into "indcast"
+       set in high-contrast serif ink. No redundant double-H lockup. -->
+  <style>
+    .brass { fill: #8F7132; }
+    .ink   { fill: #26211A; }
+    @media (prefers-color-scheme: dark) {
+      .brass { fill: #C9A96A; }
+      .ink   { fill: #E8E2D6; }
+    }
+  </style>
+  <g transform="translate(17.8,35.2) scale(0.847)">
+    <path class="brass" fill-rule="nonzero" d="
+      M12 14H36V17H30V83H36V86H12V83H18V17H12Z
+      M64 14H88V17H82V83H88V86H64V83H70V17H64Z
+      M29 44H71V56H29Z
+      M38 48v4h4v-4Z
+      M48 48v4h4v-4Z
+      M58 48v4h4v-4Z"/>
+  </g>
+  <text class="ink" x="98" y="108" font-family="Georgia, 'Times New Roman', serif"
+        font-size="88" letter-spacing="-1">indcast</text>
+</svg>
