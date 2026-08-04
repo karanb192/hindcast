@@ -37,20 +37,38 @@ async function refreshIndex() {
   const cache = loadCache();
   try {
     // Watch-triggered rescans are mtime-cached and near-instant; progress
-    // flicker is only worth showing while the first full index streams.
-    const showProgress = !firstIndexDone;
+    // flicker is only worth showing while the first full index streams. But
+    // a later rescan can turn out to be a bulk re-parse (cache file deleted,
+    // format-version bump, transcripts restored from another machine), and
+    // going silent for one of those would look like a hang; once the rescan
+    // has re-parsed enough files to matter, progress comes back.
+    const isFirstIndex = !firstIndexDone;
+    let sentProgress = false;
     index = await buildIndex(cache, (p) => {
-      if (showProgress && win && !win.isDestroyed()) win.webContents.send('index:progress', p);
+      if (!isFirstIndex && p.parsed < 25) return;
+      sentProgress = true;
+      if (win && !win.isDestroyed()) win.webContents.send('index:progress', p);
     });
     sessionsById = new Map(index.sessions.map((s) => [s.id, s]));
     saveCache(cache);
     // Active Claude Code sessions fire the watcher constantly; when a rescan
     // produces an identical index, skip the ready ping so the renderer
-    // doesn't reload and re-render the whole app for nothing.
-    const sig = JSON.stringify(index);
+    // doesn't reload and re-render the whole app for nothing. The shipped
+    // index is a pure function of each transcript's (path, mtime, size), so
+    // this signature misses no real change, and sorting makes it immune to
+    // directory-enumeration order. Kept over JSON.stringify(index), which
+    // re-stringified the whole shipped index every rescan and held the
+    // result in memory for the life of the app (~8x larger, grows with
+    // every session and with per-day usage history).
+    const sig = index.sessions
+      .map((s) => s.filePath + ':' + s.mtime + ':' + s.size)
+      .sort()
+      .join('|');
     const changed = sig !== lastIndexSig;
     lastIndexSig = sig;
-    if ((changed || !firstIndexDone) && win && !win.isDestroyed()) {
+    // sentProgress forces a ready ping even for an identical index, else a
+    // bulk re-parse of unchanged files would leave the progress bar stuck.
+    if ((changed || !firstIndexDone || sentProgress) && win && !win.isDestroyed()) {
       win.webContents.send('index:ready');
     }
     firstIndexDone = true;
