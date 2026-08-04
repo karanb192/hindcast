@@ -1,6 +1,6 @@
 {
   "name": "hindcast",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browse, search, and replay every Claude Code session on your Mac. A local-first session viewer, timeline scrubber, and cost tracker.",
   "author": "Karan Bansal",
   "license": "MIT",
@@ -20,7 +20,7 @@
   "build": {
     "appId": "in.karanbansal.hindcast",
     "productName": "Hindcast",
-    "copyright": "Copyright © 2026 Karan Bansal",
+    "copyright": "Copyright \u00a9 2026 Karan Bansal",
     "directories": {
       "output": "dist"
     },
@@ -35,15 +35,29 @@
     ],
     "mac": {
       "target": [
-        { "target": "zip", "arch": ["arm64"] },
-        { "target": "dmg", "arch": ["arm64"] }
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",
       "identity": null,
       "hardenedRuntime": false
     },
-    "publish": { "provider": "github", "owner": "karanb192", "repo": "hindcast" }
+    "publish": {
+      "provider": "github",
+      "owner": "karanb192",
+      "repo": "hindcast"
+    }
   },
   "devDependencies": {
     "dompurify": "^3.1.6",
