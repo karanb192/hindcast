@@ -399,9 +399,20 @@ const SessionListBody = React.memo(function SessionListBody({
   };
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
 
+  // A new query means new results: start reading from the top.
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+    setScrollTop(0);
+  }, [deferredFilter]);
+
   const row = rowH || ROW_FALLBACK;
-  const start = Math.max(0, Math.floor(scrollTop / row) - OVERSCAN);
-  const end = Math.min(shown.length, Math.ceil((scrollTop + (viewH || 800)) / row) + OVERSCAN);
+  const vh = viewH || 800;
+  // Clamp the window to the end of the list: when a query shrinks the result
+  // set while scrolled deep, the stale scrollTop must not strand the slice
+  // past the last row (an empty slice under a phantom padding spacer).
+  const maxStart = Math.max(0, shown.length - Math.ceil(vh / row) - OVERSCAN);
+  const start = Math.max(0, Math.min(Math.floor(scrollTop / row) - OVERSCAN, maxStart));
+  const end = Math.min(shown.length, Math.ceil((scrollTop + vh) / row) + OVERSCAN);
 
   return (
     <div className="session-list" ref={listRef} onScroll={onScroll}>
