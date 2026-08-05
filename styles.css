@@ -350,7 +350,7 @@ body {
   /* Off-screen cards skip layout and paint; the estimate only needs to be
      in the right ballpark for the scrollbar to feel honest. */
   content-visibility: auto;
-  contain-intrinsic-size: auto 62px;
+  contain-intrinsic-size: auto 68px;
 }
 .session-card:hover { background: var(--bg-hover); }
 .session-card.active {

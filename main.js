@@ -30,6 +30,7 @@ function saveCache(cache) {
 
 let firstIndexDone = false;
 let lastIndexSig = null;
+let servedWhileIndexing = false;
 
 async function refreshIndex() {
   if (indexing) return;
@@ -44,7 +45,9 @@ async function refreshIndex() {
     // has re-parsed enough files to matter, progress comes back.
     const isFirstIndex = !firstIndexDone;
     let sentProgress = false;
+    let lastParsed = 0;
     index = await buildIndex(cache, (p) => {
+      lastParsed = p.parsed;
       if (!isFirstIndex && p.parsed < 25) return;
       sentProgress = true;
       if (win && !win.isDestroyed()) win.webContents.send('index:progress', p);
@@ -53,24 +56,30 @@ async function refreshIndex() {
     saveCache(cache);
     // Active Claude Code sessions fire the watcher constantly; when a rescan
     // produces an identical index, skip the ready ping so the renderer
-    // doesn't reload and re-render the whole app for nothing. The shipped
-    // index is a pure function of each transcript's (path, mtime, size), so
-    // this signature misses no real change, and sorting makes it immune to
-    // directory-enumeration order. Kept over JSON.stringify(index), which
-    // re-stringified the whole shipped index every rescan and held the
-    // result in memory for the life of the app (~8x larger, grows with
-    // every session and with per-day usage history).
+    // doesn't reload and re-render the whole app for nothing. The signature
+    // is (path, mtime, size) of every main transcript; with the dedup
+    // tiebreak in scanner.js the shipped index is a pure function of that
+    // set, EXCEPT for subagent files, which fold into cached meta without
+    // appearing in the signature. That is why any rescan that actually
+    // re-parsed files (lastParsed > 0) always pings: after a cache loss the
+    // re-parse can pick up changed subagent usage under an unchanged
+    // signature. Kept over JSON.stringify(index), which re-stringified the
+    // whole shipped index every rescan and held the result in memory for
+    // the life of the app.
     const sig = index.sessions
       .map((s) => s.filePath + ':' + s.mtime + ':' + s.size)
       .sort()
       .join('|');
     const changed = sig !== lastIndexSig;
     lastIndexSig = sig;
-    // sentProgress forces a ready ping even for an identical index, else a
-    // bulk re-parse of unchanged files would leave the progress bar stuck.
-    if ((changed || !firstIndexDone || sentProgress) && win && !win.isDestroyed()) {
+    // sentProgress keeps a visible progress bar from sticking; lastParsed
+    // covers re-parses too small to have shown progress; servedWhileIndexing
+    // unsticks a renderer that snapshotted indexing:true mid-rescan.
+    const mustPing = changed || !firstIndexDone || sentProgress || lastParsed > 0 || servedWhileIndexing;
+    if (mustPing && win && !win.isDestroyed()) {
       win.webContents.send('index:ready');
     }
+    servedWhileIndexing = false;
     firstIndexDone = true;
   } finally {
     indexing = false;
@@ -143,11 +152,16 @@ app.on('window-all-closed', () => app.quit());
 
 // ---------- IPC ----------
 
-ipcMain.handle('index:get', () => ({
-  projects: index.projects,
-  sessions: index.sessions.map((s) => ({ ...s })),
-  indexing,
-}));
+ipcMain.handle('index:get', () => {
+  // A snapshot taken mid-rescan shows "indexing"; the renderer clears that
+  // only on index:ready, so remember to ping even if the rescan ends quiet.
+  if (indexing) servedWhileIndexing = true;
+  return {
+    projects: index.projects,
+    sessions: index.sessions.map((s) => ({ ...s })),
+    indexing,
+  };
+});
 
 ipcMain.handle('index:refresh', async () => { await refreshIndex(); return true; });
 

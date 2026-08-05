@@ -94,6 +94,13 @@ function SpoolMark({ size = 20 }) {
 const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filtersActive, themePref, setThemePref, view }) {
   // Local query: typing here re-renders only the rail, never the app.
   const [projectQuery, setProjectQuery] = useState('');
+  const filterVisible = projects.length > 8;
+  // If a rescan drops the project count below the threshold, the input
+  // unmounts; clear its query too or an invisible filter keeps narrowing
+  // the list with no control left to clear it.
+  useEffect(() => {
+    if (!filterVisible && projectQuery) setProjectQuery('');
+  }, [filterVisible, projectQuery]);
   const shownProjects = useMemo(() => {
     const q = projectQuery.trim().toLowerCase();
     if (!q) return projects;
@@ -122,7 +129,7 @@ const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessi
       </div>
       <div className="rail-list">
         <div className="rail-section">Projects</div>
-        {projects.length > 8 && (
+        {filterVisible && (
           <input
             className="rail-filter"
             placeholder="Filter projects…"
@@ -130,7 +137,7 @@ const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessi
             onChange={(e) => setProjectQuery(e.target.value)}
           />
         )}
-        {shownProjects.length === 0 && (
+        {projectQuery.trim() !== '' && shownProjects.length === 0 && (
           <div className="rail-empty">no matching projects</div>
         )}
         {shownProjects.map((p) => {
@@ -377,10 +384,12 @@ function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, a
       <div className="session-list">
         {shown.length === 0 && (
           <div className="list-empty">
-            {filter.trim() ? (
+            {/* judge emptiness by the same value that produced the list, or
+                the message flashes one deferred frame out of sync */}
+            {deferredFilter.trim() ? (
               <>
-                <div>No titles match “{filter.trim()}”.</div>
-                <div className="hint-line" onClick={() => onSearchTranscripts(filter.trim())}>
+                <div>No titles match “{deferredFilter.trim()}”.</div>
+                <div className="hint-line" onClick={() => onSearchTranscripts(deferredFilter.trim())}>
                   Search inside transcripts <span className="kbd">⌘K</span>
                 </div>
               </>
@@ -1520,7 +1529,7 @@ function App() {
         setThemePref={setThemePref}
       />
       <SessionList
-        key={selectedProject || '(all)'} /* remount on scope change clears the title query, matching the old behavior */
+        key={selectedProject || '(all)'} /* remount on scope change clears the title query (also resets list scroll and dropdown state, which the old App-owned clear did not) */
         sessions={filteredSessions}
         selectedId={selectedSession}
         onSelect={selectSession}
