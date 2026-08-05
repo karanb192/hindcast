@@ -340,7 +340,14 @@ body {
 }
 .dd-date:focus { border-color: var(--brass-dim); }
 
+.list-shell {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  transition: opacity 0.12s ease;
+}
 .session-list { overflow-y: auto; flex: 1; min-height: 0; padding: 0 8px 20px; }
+
+.filtering-note { color: var(--brass-dim); }
 
 .session-card {
   padding: 10px 12px;

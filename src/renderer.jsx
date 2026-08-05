@@ -354,12 +354,92 @@ const SessionCard = React.memo(function SessionCard({ s, active, onSelect }) {
   );
 });
 
+// Windowed list body. Memoized so the urgent keystroke render (which only
+// changes `filter`, not `deferredFilter`) bails out here entirely: a
+// keystroke's synchronous work is the input plus the meta line, nothing else.
+// Windowing keeps the catch-up commit small too: however large the archive,
+// only the visible slice (plus overscan) exists in the DOM, so entering and
+// leaving a filter never mutates thousands of nodes.
+const ROW_FALLBACK = 68;
+const OVERSCAN = 8;
+
+const SessionListBody = React.memo(function SessionListBody({
+  shown, selectedId, onSelect, deferredFilter, anyFilter, onClearFilters, onSearchTranscripts,
+}) {
+  const listRef = useRef(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewH, setViewH] = useState(0);
+  const [rowH, setRowH] = useState(0);
+  const rafRef = useRef(0);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => setViewH(el.clientHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Real row height from the first rendered card; the fallback only has to
+  // hold until first paint.
+  useEffect(() => {
+    if (rowH) return;
+    const card = listRef.current && listRef.current.querySelector('.session-card');
+    if (card && card.offsetHeight) setRowH(card.offsetHeight);
+  });
+
+  const onScroll = () => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      if (listRef.current) setScrollTop(listRef.current.scrollTop);
+    });
+  };
+  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+
+  const row = rowH || ROW_FALLBACK;
+  const start = Math.max(0, Math.floor(scrollTop / row) - OVERSCAN);
+  const end = Math.min(shown.length, Math.ceil((scrollTop + (viewH || 800)) / row) + OVERSCAN);
+
+  return (
+    <div className="session-list" ref={listRef} onScroll={onScroll}>
+      {shown.length === 0 && (
+        <div className="list-empty">
+          {deferredFilter.trim() ? (
+            <>
+              <div>No titles match “{deferredFilter.trim()}”.</div>
+              <div className="hint-line" onClick={() => onSearchTranscripts(deferredFilter.trim())}>
+                Search inside transcripts <span className="kbd">⌘K</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>No sessions in this view.</div>
+              {anyFilter && <div className="hint-line" onClick={onClearFilters}>Clear filters</div>}
+            </>
+          )}
+        </div>
+      )}
+      <div style={{ paddingTop: start * row, paddingBottom: (shown.length - end) * row }}>
+        {shown.slice(start, end).map((s) => (
+          <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} />
+        ))}
+      </div>
+    </div>
+  );
+});
+
 function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, anyFilter, onClearFilters, onSearchTranscripts }) {
   // The query lives here, not in App: a keystroke re-renders this list only,
   // never the rail or the stage. The deferred value lets the input echo
   // instantly while the filtered list catches up a frame later.
   const [filter, setFilter] = useState('');
   const deferredFilter = useDeferredValue(filter);
+  // While the list is catching up to the input, say so instead of showing a
+  // count that belongs to the previous query.
+  const isStale = filter !== deferredFilter;
   const shown = useMemo(() => {
     if (!deferredFilter.trim()) return sessions;
     const q = deferredFilter.toLowerCase();
@@ -381,32 +461,23 @@ function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, a
         {filterBar}
       </div>
       <div className="sessions-meta">
-        {shown.length.toLocaleString()} session{shown.length === 1 ? '' : 's'}
+        {isStale
+          ? <span className="filtering-note">filtering…</span>
+          : <>{shown.length.toLocaleString()} session{shown.length === 1 ? '' : 's'}</>}
         {anyFilter && <span className="clear-link" onClick={onClearFilters}> · clear filters</span>}
       </div>
-      <div className="session-list">
-        {shown.length === 0 && (
-          <div className="list-empty">
-            {/* judge emptiness by the same value that produced the list, or
-                the message flashes one deferred frame out of sync */}
-            {deferredFilter.trim() ? (
-              <>
-                <div>No titles match “{deferredFilter.trim()}”.</div>
-                <div className="hint-line" onClick={() => onSearchTranscripts(deferredFilter.trim())}>
-                  Search inside transcripts <span className="kbd">⌘K</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div>No sessions in this view.</div>
-                {anyFilter && <div className="hint-line" onClick={onClearFilters}>Clear filters</div>}
-              </>
-            )}
-          </div>
-        )}
-        {shown.map((s) => (
-          <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} />
-        ))}
+      {/* The shell carries the stale dim so the memoized body doesn't take
+          isStale as a prop, which would drag it into the urgent render. */}
+      <div className="list-shell" style={{ opacity: isStale ? 0.55 : 1 }}>
+        <SessionListBody
+          shown={shown}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          deferredFilter={deferredFilter}
+          anyFilter={anyFilter}
+          onClearFilters={onClearFilters}
+          onSearchTranscripts={onSearchTranscripts}
+        />
       </div>
     </div>
   );
