@@ -1,5 +1,7 @@
 # Dependencies & build output
-node_modules/
+# (no trailing slash: also matches a node_modules symlink, which the
+# directory-only pattern let slip into the index once)
+node_modules
 out/
 dist/
 build/

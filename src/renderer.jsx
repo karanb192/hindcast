@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createRoot } from 'react-dom/client';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -91,7 +91,23 @@ function SpoolMark({ size = 20 }) {
   );
 }
 
-function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filtersActive, themePref, setThemePref, view }) {
+const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filtersActive, themePref, setThemePref, view }) {
+  // Local query: typing here re-renders only the rail, never the app.
+  const [projectQuery, setProjectQuery] = useState('');
+  const filterVisible = projects.length > 8;
+  // If a rescan drops the project count below the threshold, the input
+  // unmounts; clear its query too or an invisible filter keeps narrowing
+  // the list with no control left to clear it.
+  useEffect(() => {
+    if (!filterVisible && projectQuery) setProjectQuery('');
+  }, [filterVisible, projectQuery]);
+  const shownProjects = useMemo(() => {
+    const q = projectQuery.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) =>
+      p.name.toLowerCase().includes(q) || (p.path || '').toLowerCase().includes(q)
+    );
+  }, [projects, projectQuery]);
   return (
     <div className="rail">
       <div className="rail-brand"><span className="brand-mark"><SpoolMark /></span>Hindcast</div>
@@ -113,7 +129,18 @@ function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filt
       </div>
       <div className="rail-list">
         <div className="rail-section">Projects</div>
-        {projects.map((p) => {
+        {filterVisible && (
+          <input
+            className="rail-filter"
+            placeholder="Filter projects…"
+            value={projectQuery}
+            onChange={(e) => setProjectQuery(e.target.value)}
+          />
+        )}
+        {projectQuery.trim() !== '' && shownProjects.length === 0 && (
+          <div className="rail-empty">no matching projects</div>
+        )}
+        {shownProjects.map((p) => {
           const n = projectCounts.get(p.id) || 0;
           const dim = filtersActive && n === 0 && !(selected === p.id && view === 'archive');
           return (
@@ -143,7 +170,7 @@ function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filt
       </div>
     </div>
   );
-}
+});
 
 // ---------- filters ----------
 
@@ -300,15 +327,44 @@ function FilterBar({ dateFilter, setDateFilter, modelFilter, setModelFilter, mod
 
 // ---------- session list ----------
 
-function SessionList({ sessions, selectedId, onSelect, filter, setFilter, projectName, filterBar, anyFilter, onClearFilters, onSearchTranscripts }) {
+const SessionCard = React.memo(function SessionCard({ s, active, onSelect }) {
+  return (
+    <div
+      className={'session-card' + (active ? ' active' : '')}
+      onClick={() => onSelect(s.id)}
+    >
+      <div className="title">{s.title || 'Untitled session'}</div>
+      <div className="sub">
+        <span>{fmtDate(s.lastTs)}</span>
+        <span className="sep">·</span>
+        <span className="proj">{(s.projectPath || '').split('/').pop()}</span>
+        {s.tokens.output > 0 && <>
+          <span className="sep">·</span>
+          <span>{fmtTokens(s.tokens.output)} out</span>
+        </>}
+        {s.toolCalls > 0 && <>
+          <span className="sep">·</span>
+          <span>{s.toolCalls} tools</span>
+        </>}
+      </div>
+    </div>
+  );
+});
+
+function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, anyFilter, onClearFilters, onSearchTranscripts }) {
+  // The query lives here, not in App: a keystroke re-renders this list only,
+  // never the rail or the stage. The deferred value lets the input echo
+  // instantly while the filtered list catches up a frame later.
+  const [filter, setFilter] = useState('');
+  const deferredFilter = useDeferredValue(filter);
   const shown = useMemo(() => {
-    if (!filter.trim()) return sessions;
-    const q = filter.toLowerCase();
+    if (!deferredFilter.trim()) return sessions;
+    const q = deferredFilter.toLowerCase();
     return sessions.filter((s) =>
       (s.title || '').toLowerCase().includes(q) ||
       (s.projectPath || '').toLowerCase().includes(q)
     );
-  }, [sessions, filter]);
+  }, [sessions, deferredFilter]);
 
   return (
     <div className="sessions">
@@ -328,10 +384,12 @@ function SessionList({ sessions, selectedId, onSelect, filter, setFilter, projec
       <div className="session-list">
         {shown.length === 0 && (
           <div className="list-empty">
-            {filter.trim() ? (
+            {/* judge emptiness by the same value that produced the list, or
+                the message flashes one deferred frame out of sync */}
+            {deferredFilter.trim() ? (
               <>
-                <div>No titles match “{filter.trim()}”.</div>
-                <div className="hint-line" onClick={() => onSearchTranscripts(filter.trim())}>
+                <div>No titles match “{deferredFilter.trim()}”.</div>
+                <div className="hint-line" onClick={() => onSearchTranscripts(deferredFilter.trim())}>
                   Search inside transcripts <span className="kbd">⌘K</span>
                 </div>
               </>
@@ -344,26 +402,7 @@ function SessionList({ sessions, selectedId, onSelect, filter, setFilter, projec
           </div>
         )}
         {shown.map((s) => (
-          <div
-            key={s.id}
-            className={'session-card' + (s.id === selectedId ? ' active' : '')}
-            onClick={() => onSelect(s.id)}
-          >
-            <div className="title">{s.title || 'Untitled session'}</div>
-            <div className="sub">
-              <span>{fmtDate(s.lastTs)}</span>
-              <span className="sep">·</span>
-              <span className="proj">{(s.projectPath || '').split('/').pop()}</span>
-              {s.tokens.output > 0 && <>
-                <span className="sep">·</span>
-                <span>{fmtTokens(s.tokens.output)} out</span>
-              </>}
-              {s.toolCalls > 0 && <>
-                <span className="sep">·</span>
-                <span>{s.toolCalls} tools</span>
-              </>}
-            </div>
-          </div>
+          <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} />
         ))}
       </div>
     </div>
@@ -1336,7 +1375,6 @@ function App() {
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
   const [jumpToUuid, setJumpToUuid] = useState(null);
-  const [filter, setFilter] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchSeed, setSearchSeed] = useState('');
   const [view, setView] = useState('archive'); // 'archive' | 'ledger'
@@ -1450,6 +1488,19 @@ function App() {
     setModelFilter(new Set());
   };
 
+  // Stable handlers so the memoized Rail and session cards skip re-renders.
+  const selectFromRail = useCallback((p, v) => {
+    setView(v || 'archive');
+    if (p !== selectedProject) {
+      setModelFilter(new Set()); // scope changed; a stale selection would be invisible and uncheckable
+    }
+    setSelectedProject(p); setSelectedSession(null);
+  }, [selectedProject]);
+
+  const selectSession = useCallback((id) => {
+    setSelectedSession(id); setJumpToUuid(null); setView('archive');
+  }, []);
+
   const projectName = selectedProject
     ? index.projects.find((p) => p.id === selectedProject)?.name
     : null;
@@ -1470,14 +1521,7 @@ function App() {
         projects={index.projects}
         selected={selectedProject}
         view={view}
-        onSelect={(p, v) => {
-          setView(v || 'archive');
-          if (p !== selectedProject) {
-            setModelFilter(new Set()); // scope changed; a stale selection would be invisible and uncheckable
-            setFilter('');
-          }
-          setSelectedProject(p); setSelectedSession(null);
-        }}
+        onSelect={selectFromRail}
         totalSessions={railCounts.total}
         projectCounts={railCounts.byProject}
         filtersActive={anyFilter}
@@ -1485,11 +1529,10 @@ function App() {
         setThemePref={setThemePref}
       />
       <SessionList
+        key={selectedProject || '(all)'} /* remount on scope change clears the title query (also resets list scroll and dropdown state, which the old App-owned clear did not) */
         sessions={filteredSessions}
         selectedId={selectedSession}
-        onSelect={(id) => { setSelectedSession(id); setJumpToUuid(null); setView('archive'); }}
-        filter={filter}
-        setFilter={setFilter}
+        onSelect={selectSession}
         projectName={projectName}
         anyFilter={anyFilter}
         onClearFilters={clearFilters}
