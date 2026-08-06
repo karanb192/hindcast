@@ -18,17 +18,20 @@ const fmtTokens = (n) => {
   return String(n);
 };
 
+// toLocaleDateString builds a fresh Intl.DateTimeFormat on every call
+// (~0.05ms each: a full session-list render burned ~23ms on dates alone).
+// Shared formatter instances make the same render ~150x cheaper.
+const DATE_FMT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+const DATE_FMT_YEAR = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const TIME_FMT = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+
 const fmtDate = (ts) => {
   if (!ts) return '';
   const d = new Date(ts);
-  const now = new Date();
-  const sameYear = d.getFullYear() === now.getFullYear();
-  return d.toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }),
-  });
+  return d.getFullYear() === new Date().getFullYear() ? DATE_FMT.format(d) : DATE_FMT_YEAR.format(d);
 };
 
-const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+const fmtTime = (ts) => ts ? TIME_FMT.format(ts) : '';
 
 const fmtUSD = (n) => {
   if (n == null) return '—';
@@ -351,12 +354,58 @@ const SessionCard = React.memo(function SessionCard({ s, active, onSelect }) {
   );
 });
 
+// List body, memoized so the urgent keystroke render (which only changes
+// `filter`, not `deferredFilter`) bails out here entirely: a keystroke's
+// synchronous work is the input plus the meta line, nothing else.
+// NOT windowed: card heights vary (1 to 2 title lines and sub lines), so
+// fixed-row padding spacers drift and the list visibly jumps mid-scroll.
+// Off-screen layout/paint cost is already covered by the cards'
+// content-visibility:auto, which handles variable heights natively.
+const SessionListBody = React.memo(function SessionListBody({
+  shown, selectedId, onSelect, deferredFilter, anyFilter, onClearFilters, onSearchTranscripts,
+}) {
+  const listRef = useRef(null);
+
+  // A new query means new results: start reading from the top.
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [deferredFilter]);
+
+  return (
+    <div className="session-list" ref={listRef}>
+      {shown.length === 0 && (
+        <div className="list-empty">
+          {deferredFilter.trim() ? (
+            <>
+              <div>No titles match “{deferredFilter.trim()}”.</div>
+              <div className="hint-line" onClick={() => onSearchTranscripts(deferredFilter.trim())}>
+                Search inside transcripts <span className="kbd">⌘K</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>No sessions in this view.</div>
+              {anyFilter && <div className="hint-line" onClick={onClearFilters}>Clear filters</div>}
+            </>
+          )}
+        </div>
+      )}
+      {shown.map((s) => (
+        <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} />
+      ))}
+    </div>
+  );
+});
+
 function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, anyFilter, onClearFilters, onSearchTranscripts }) {
   // The query lives here, not in App: a keystroke re-renders this list only,
   // never the rail or the stage. The deferred value lets the input echo
   // instantly while the filtered list catches up a frame later.
   const [filter, setFilter] = useState('');
   const deferredFilter = useDeferredValue(filter);
+  // While the list is catching up to the input, say so instead of showing a
+  // count that belongs to the previous query.
+  const isStale = filter !== deferredFilter;
   const shown = useMemo(() => {
     if (!deferredFilter.trim()) return sessions;
     const q = deferredFilter.toLowerCase();
@@ -378,32 +427,23 @@ function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, a
         {filterBar}
       </div>
       <div className="sessions-meta">
-        {shown.length.toLocaleString()} session{shown.length === 1 ? '' : 's'}
+        {isStale
+          ? <span className="filtering-note">filtering…</span>
+          : <>{shown.length.toLocaleString()} session{shown.length === 1 ? '' : 's'}</>}
         {anyFilter && <span className="clear-link" onClick={onClearFilters}> · clear filters</span>}
       </div>
-      <div className="session-list">
-        {shown.length === 0 && (
-          <div className="list-empty">
-            {/* judge emptiness by the same value that produced the list, or
-                the message flashes one deferred frame out of sync */}
-            {deferredFilter.trim() ? (
-              <>
-                <div>No titles match “{deferredFilter.trim()}”.</div>
-                <div className="hint-line" onClick={() => onSearchTranscripts(deferredFilter.trim())}>
-                  Search inside transcripts <span className="kbd">⌘K</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div>No sessions in this view.</div>
-                {anyFilter && <div className="hint-line" onClick={onClearFilters}>Clear filters</div>}
-              </>
-            )}
-          </div>
-        )}
-        {shown.map((s) => (
-          <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} />
-        ))}
+      {/* The shell carries the stale dim so the memoized body doesn't take
+          isStale as a prop, which would drag it into the urgent render. */}
+      <div className="list-shell" style={{ opacity: isStale ? 0.55 : 1 }}>
+        <SessionListBody
+          shown={shown}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          deferredFilter={deferredFilter}
+          anyFilter={anyFilter}
+          onClearFilters={onClearFilters}
+          onSearchTranscripts={onSearchTranscripts}
+        />
       </div>
     </div>
   );
@@ -1369,6 +1409,52 @@ class Boundary extends React.Component {
 
 // ---------- app ----------
 
+// A live re-index ships brand-new objects for every session, which defeats
+// every React.memo downstream and re-renders the whole UI each time the
+// watcher fires (constantly, while a Claude Code session is running). Reuse
+// the previous object whenever the fields the UI reads are unchanged; a
+// typical rescan then touches one session and every other card bails.
+const sameTokens = (a, b) =>
+  a.input === b.input && a.output === b.output &&
+  a.cacheRead === b.cacheRead && a.cacheWrite === b.cacheWrite;
+
+function mergeIndex(prev, next) {
+  const prevSessions = new Map(prev.sessions.map((s) => [s.id, s]));
+  let sessionsSame = prev.sessions.length === next.sessions.length;
+  const sessions = next.sessions.map((s, i) => {
+    const p = prevSessions.get(s.id);
+    // filePath too: a transcript relocated with mtime/size intact (project dir
+    // re-encode, restore from another machine) must not keep the old path or
+    // its project attribution alive.
+    if (p && p.mtime === s.mtime && p.size === s.size && p.filePath === s.filePath &&
+        p.title === s.title && p.lastTs === s.lastTs && p.toolCalls === s.toolCalls &&
+        sameTokens(p.tokens, s.tokens)) {
+      if (prev.sessions[i] !== p) sessionsSame = false;
+      return p;
+    }
+    sessionsSame = false;
+    return s;
+  });
+  const prevProjects = new Map(prev.projects.map((p) => [p.id, p]));
+  let projectsSame = prev.projects.length === next.projects.length;
+  const projects = next.projects.map((n, i) => {
+    const p = prevProjects.get(n.id);
+    if (p && p.name === n.name && p.path === n.path && p.sessions === n.sessions &&
+        p.lastTs === n.lastTs && p.tokens === n.tokens) {
+      if (prev.projects[i] !== p) projectsSame = false;
+      return p;
+    }
+    projectsSame = false;
+    return n;
+  });
+  if (sessionsSame && projectsSame && prev.indexing === next.indexing) return prev;
+  return {
+    projects: projectsSame ? prev.projects : projects,
+    sessions: sessionsSame ? prev.sessions : sessions,
+    indexing: next.indexing,
+  };
+}
+
 function App() {
   const [index, setIndex] = useState({ projects: [], sessions: [], indexing: true });
   const [progress, setProgress] = useState(null);
@@ -1414,7 +1500,7 @@ function App() {
 
   const loadIndex = useCallback(async () => {
     const idx = await api.getIndex();
-    setIndex(idx);
+    setIndex((prev) => mergeIndex(prev, idx));
   }, []);
 
   useEffect(() => {
