@@ -493,7 +493,7 @@ body {
 .sv-meta .reveal.copied { color: var(--brass); border-color: var(--brass); }
 
 .resume-edit {
-  display: flex; gap: 10px; align-items: center;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
   margin-top: 7px;
   font-family: var(--mono); font-size: 10.5px; color: var(--putty-dim);
 }

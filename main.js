@@ -103,6 +103,8 @@ function readSettings() {
   if (!settingsCache) {
     try { settingsCache = JSON.parse(fs.readFileSync(SETTINGS_PATH(), 'utf8')); }
     catch { settingsCache = {}; }
+    // a hand-edited file can hold valid JSON that is not an object
+    if (!settingsCache || typeof settingsCache !== 'object' || Array.isArray(settingsCache)) settingsCache = {};
   }
   return {
     resumeTemplate: typeof settingsCache.resumeTemplate === 'string' && settingsCache.resumeTemplate.trim()
