@@ -354,68 +354,25 @@ const SessionCard = React.memo(function SessionCard({ s, active, onSelect }) {
   );
 });
 
-// Windowed list body. Memoized so the urgent keystroke render (which only
-// changes `filter`, not `deferredFilter`) bails out here entirely: a
-// keystroke's synchronous work is the input plus the meta line, nothing else.
-// Windowing keeps the catch-up commit small too: however large the archive,
-// only the visible slice (plus overscan) exists in the DOM, so entering and
-// leaving a filter never mutates thousands of nodes.
-const ROW_FALLBACK = 68;
-const OVERSCAN = 8;
-
+// List body, memoized so the urgent keystroke render (which only changes
+// `filter`, not `deferredFilter`) bails out here entirely: a keystroke's
+// synchronous work is the input plus the meta line, nothing else.
+// NOT windowed: card heights vary (1 to 2 title lines and sub lines), so
+// fixed-row padding spacers drift and the list visibly jumps mid-scroll.
+// Off-screen layout/paint cost is already covered by the cards'
+// content-visibility:auto, which handles variable heights natively.
 const SessionListBody = React.memo(function SessionListBody({
   shown, selectedId, onSelect, deferredFilter, anyFilter, onClearFilters, onSearchTranscripts,
 }) {
   const listRef = useRef(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewH, setViewH] = useState(0);
-  const [rowH, setRowH] = useState(0);
-  const rafRef = useRef(0);
-
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    const measure = () => setViewH(el.clientHeight);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Real row height from the first rendered card; the fallback only has to
-  // hold until first paint.
-  useEffect(() => {
-    if (rowH) return;
-    const card = listRef.current && listRef.current.querySelector('.session-card');
-    if (card && card.offsetHeight) setRowH(card.offsetHeight);
-  });
-
-  const onScroll = () => {
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = 0;
-      if (listRef.current) setScrollTop(listRef.current.scrollTop);
-    });
-  };
-  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
 
   // A new query means new results: start reading from the top.
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
-    setScrollTop(0);
   }, [deferredFilter]);
 
-  const row = rowH || ROW_FALLBACK;
-  const vh = viewH || 800;
-  // Clamp the window to the end of the list: when a query shrinks the result
-  // set while scrolled deep, the stale scrollTop must not strand the slice
-  // past the last row (an empty slice under a phantom padding spacer).
-  const maxStart = Math.max(0, shown.length - Math.ceil(vh / row) - OVERSCAN);
-  const start = Math.max(0, Math.min(Math.floor(scrollTop / row) - OVERSCAN, maxStart));
-  const end = Math.min(shown.length, Math.ceil((scrollTop + vh) / row) + OVERSCAN);
-
   return (
-    <div className="session-list" ref={listRef} onScroll={onScroll}>
+    <div className="session-list" ref={listRef}>
       {shown.length === 0 && (
         <div className="list-empty">
           {deferredFilter.trim() ? (
@@ -433,11 +390,9 @@ const SessionListBody = React.memo(function SessionListBody({
           )}
         </div>
       )}
-      <div style={{ paddingTop: start * row, paddingBottom: (shown.length - end) * row }}>
-        {shown.slice(start, end).map((s) => (
-          <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} />
-        ))}
-      </div>
+      {shown.map((s) => (
+        <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} />
+      ))}
     </div>
   );
 });
@@ -1468,8 +1423,12 @@ function mergeIndex(prev, next) {
   let sessionsSame = prev.sessions.length === next.sessions.length;
   const sessions = next.sessions.map((s, i) => {
     const p = prevSessions.get(s.id);
-    if (p && p.mtime === s.mtime && p.size === s.size && p.title === s.title &&
-        p.lastTs === s.lastTs && p.toolCalls === s.toolCalls && sameTokens(p.tokens, s.tokens)) {
+    // filePath too: a transcript relocated with mtime/size intact (project dir
+    // re-encode, restore from another machine) must not keep the old path or
+    // its project attribution alive.
+    if (p && p.mtime === s.mtime && p.size === s.size && p.filePath === s.filePath &&
+        p.title === s.title && p.lastTs === s.lastTs && p.toolCalls === s.toolCalls &&
+        sameTokens(p.tokens, s.tokens)) {
       if (prev.sessions[i] !== p) sessionsSame = false;
       return p;
     }
