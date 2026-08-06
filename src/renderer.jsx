@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createRoot } from 'react-dom/client';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -366,8 +366,10 @@ const SessionListBody = React.memo(function SessionListBody({
 }) {
   const listRef = useRef(null);
 
-  // A new query means new results: start reading from the top.
-  useEffect(() => {
+  // A new query means new results: start reading from the top. Layout effect,
+  // not passive: the reset must land before the commit paints, or a keystroke
+  // while scrolled deep flashes one frame of the old scroll position first.
+  useLayoutEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
   }, [deferredFilter]);
 
