@@ -93,6 +93,24 @@ function readTheme() {
   catch { return { pref: 'auto', resolved: nativeTheme.shouldUseDarkColors ? 'dark' : 'light' }; }
 }
 
+const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
+// {cwd} is substituted shell-quoted; {sessionId} bare. The default is the
+// single source of truth here; the renderer gets it via settings:get.
+const RESUME_TEMPLATE_DEFAULT = 'cd {cwd} && claude --resume {sessionId}';
+let settingsCache = null;
+
+function readSettings() {
+  if (!settingsCache) {
+    try { settingsCache = JSON.parse(fs.readFileSync(SETTINGS_PATH(), 'utf8')); }
+    catch { settingsCache = {}; }
+  }
+  return {
+    resumeTemplate: typeof settingsCache.resumeTemplate === 'string' && settingsCache.resumeTemplate.trim()
+      ? settingsCache.resumeTemplate : RESUME_TEMPLATE_DEFAULT,
+    resumeTemplateDefault: RESUME_TEMPLATE_DEFAULT,
+  };
+}
+
 function createWindow() {
   const theme = readTheme();
   nativeTheme.themeSource = theme.pref === 'auto' ? 'system' : theme.pref;
@@ -214,6 +232,22 @@ ipcMain.handle('session:export', async (_e, { id, format }) => {
   } catch (err) {
     return null;
   }
+});
+
+ipcMain.handle('settings:get', () => readSettings());
+
+ipcMain.handle('settings:save', (_e, s) => {
+  if (!s || typeof s !== 'object') return readSettings();
+  if ('resumeTemplate' in s) {
+    // A cleared or default-valued template is stored as absent, so future
+    // default changes reach users who never customized it.
+    const t = typeof s.resumeTemplate === 'string' ? s.resumeTemplate.trim().slice(0, 500) : '';
+    readSettings(); // loads settingsCache if this is the first touch
+    if (t && t !== RESUME_TEMPLATE_DEFAULT) settingsCache.resumeTemplate = t;
+    else delete settingsCache.resumeTemplate;
+  }
+  try { fs.writeFileSync(SETTINGS_PATH(), JSON.stringify(settingsCache)); } catch {}
+  return readSettings();
 });
 
 ipcMain.handle('theme:save', (_e, t) => {

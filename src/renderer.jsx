@@ -1204,11 +1204,11 @@ function SubagentView({ sessionId, agent, theme, onBack }) {
   );
 }
 
-function CopyChip({ label, value, title }) {
+function CopyChip({ label, value, title, className = 'copy-chip' }) {
   const [copied, setCopied] = useState(false);
   return (
     <span
-      className={'copy-chip' + (copied ? ' copied' : '')}
+      className={className + (copied ? ' copied' : '')}
       title={title}
       onClick={() => navigator.clipboard.writeText(value).then(() => {
         setCopied(true);
@@ -1220,11 +1220,35 @@ function CopyChip({ label, value, title }) {
   );
 }
 
+// POSIX single-quote: closes the quote, escapes the quote char, reopens.
+const shellQuote = (p) => "'" + String(p).replace(/'/g, "'\\''") + "'";
+
+// split/join instead of replaceAll: paths may contain characters that are
+// special in a replacement string ($&, $')
+const buildResumeCmd = (template, cwd, sessionId) =>
+  template.split('{cwd}').join(shellQuote(cwd)).split('{sessionId}').join(sessionId);
+
 function SessionView({ sessionId, jumpToUuid, theme }) {
   const [data, setData] = useState(null);
   const [openAgent, setOpenAgent] = useState(null);
   const [exportState, setExportState] = useState(null); // 'md' | 'html' while in flight
+  const [settings, setSettings] = useState(null);
+  const [editingTpl, setEditingTpl] = useState(false);
+  const [tplDraft, setTplDraft] = useState('');
   const jumpedRef = useRef(null); // consume each jumpToUuid once, so returning from a subagent doesn't re-jump
+
+  useEffect(() => {
+    let alive = true;
+    api.getSettings().then((s) => { if (alive) setSettings(s); });
+    return () => { alive = false; };
+  }, []);
+
+  const saveTpl = () => {
+    api.saveSettings({ resumeTemplate: tplDraft }).then((s) => {
+      setSettings(s);
+      setEditingTpl(false);
+    });
+  };
 
   useEffect(() => {
     setData(null);
@@ -1278,12 +1302,40 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
           <span className={'reveal' + (exportState ? ' busy' : '')} onClick={() => doExport('html')}>
             {exportState === 'html' ? 'exporting…' : 'export html'}
           </span>
+          {m.cwd && settings && (
+            <>
+              <CopyChip
+                className="reveal"
+                label="resume"
+                value={buildResumeCmd(settings.resumeTemplate, m.cwd, sessionId)}
+                title={'copy: ' + buildResumeCmd(settings.resumeTemplate, m.cwd, sessionId)}
+              />
+              <span
+                className="reveal"
+                title="edit the resume command template"
+                onClick={() => { setTplDraft(settings.resumeTemplate); setEditingTpl((v) => !v); }}
+              >✎</span>
+            </>
+          )}
         </div>
         <div className="sv-path">
           {m.cwd && <CopyChip label={m.cwd} value={m.cwd} title="working directory · click to copy" />}
           {m.cwd && <span className="sep">·</span>}
           <CopyChip label={sessionId} value={sessionId} title="session id · click to copy" />
         </div>
+        {editingTpl && settings && (
+          <div className="resume-edit">
+            <input
+              value={tplDraft}
+              spellCheck={false}
+              onChange={(e) => setTplDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') saveTpl(); if (e.key === 'Escape') setEditingTpl(false); }}
+            />
+            <span className="reveal" onClick={saveTpl}>save</span>
+            <span className="reveal" onClick={() => setTplDraft(settings.resumeTemplateDefault)}>reset</span>
+            <span className="re-hint">{'{cwd}'} inserts the directory shell-quoted · {'{sessionId}'} the id · aliases from your shell work here</span>
+          </div>
+        )}
         {subs.length > 0 && (
           <div className="sub-strip">
             <span className="sub-strip-label">{subs.length} subagent reel{subs.length === 1 ? '' : 's'}</span>

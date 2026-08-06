@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('hindcast', {
   search: (q) => ipcRenderer.invoke('search:query', q),
   revealSession: (id) => ipcRenderer.invoke('shell:revealSession', id),
   saveTheme: (t) => ipcRenderer.invoke('theme:save', t),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  saveSettings: (s) => ipcRenderer.invoke('settings:save', s),
   onIndexProgress: (cb) => {
     const h = (_e, p) => cb(p);
     ipcRenderer.on('index:progress', h);

@@ -490,6 +490,29 @@ body {
 }
 .sv-meta .reveal:hover { color: var(--brass); border-color: var(--brass); }
 .sv-meta .reveal.busy { color: var(--brass-dim); border-color: var(--brass-dim); opacity: 0.7; }
+.sv-meta .reveal.copied { color: var(--brass); border-color: var(--brass); }
+
+.resume-edit {
+  display: flex; gap: 10px; align-items: center;
+  margin-top: 7px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--putty-dim);
+}
+.resume-edit input {
+  flex: 0 1 420px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim);
+  outline: none;
+}
+.resume-edit input:focus { border-color: var(--brass-dim); }
+.resume-edit .reveal {
+  cursor: default; color: var(--putty-dim);
+  border-bottom: 1px dotted var(--putty-dim);
+}
+.resume-edit .reveal:hover { color: var(--brass); border-color: var(--brass); }
+.resume-edit .re-hint { opacity: 0.65; }
 
 /* ── subagent strip ── */
 
