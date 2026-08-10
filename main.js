@@ -93,6 +93,25 @@ function readTheme() {
   catch { return { pref: 'auto', resolved: nativeTheme.shouldUseDarkColors ? 'dark' : 'light' }; }
 }
 
+const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
+const { RESUME_TEMPLATE_DEFAULT, TEMPLATE_MAX } = require('./lib/resume');
+let settingsCache = null;
+
+function readSettings() {
+  if (!settingsCache) {
+    try { settingsCache = JSON.parse(fs.readFileSync(SETTINGS_PATH(), 'utf8')); }
+    catch { settingsCache = {}; }
+    // a hand-edited file can hold valid JSON that is not an object
+    if (!settingsCache || typeof settingsCache !== 'object' || Array.isArray(settingsCache)) settingsCache = {};
+  }
+  return {
+    resumeTemplate: typeof settingsCache.resumeTemplate === 'string' && settingsCache.resumeTemplate.trim()
+      ? settingsCache.resumeTemplate : RESUME_TEMPLATE_DEFAULT,
+    resumeTemplateDefault: RESUME_TEMPLATE_DEFAULT,
+    templateMax: TEMPLATE_MAX,
+  };
+}
+
 function createWindow() {
   const theme = readTheme();
   nativeTheme.themeSource = theme.pref === 'auto' ? 'system' : theme.pref;
@@ -214,6 +233,35 @@ ipcMain.handle('session:export', async (_e, { id, format }) => {
   } catch (err) {
     return null;
   }
+});
+
+ipcMain.handle('settings:get', () => readSettings());
+
+ipcMain.handle('settings:save', (_e, s) => {
+  if (!s || typeof s !== 'object') return readSettings();
+  // Re-read from disk before mutating, so a hand edit to settings.json made
+  // while the app is running is not clobbered by this write.
+  settingsCache = null;
+  readSettings();
+  if (Object.prototype.hasOwnProperty.call(s, 'resumeTemplate')) {
+    const t = typeof s.resumeTemplate === 'string' ? s.resumeTemplate.trim() : '';
+    // The editor input caps at TEMPLATE_MAX, so over-length only arrives from
+    // outside the UI; refuse it rather than truncating mid-placeholder.
+    if (t.length > TEMPLATE_MAX) return { ...readSettings(), saveFailed: true };
+    // A cleared or default-valued template is stored as absent, so future
+    // default changes reach users who never customized it.
+    if (t && t !== RESUME_TEMPLATE_DEFAULT) settingsCache.resumeTemplate = t;
+    else delete settingsCache.resumeTemplate;
+  }
+  // Report what actually persisted: on a write failure the caller must not be
+  // told the new value is saved, or the UI shows it until the next launch.
+  try {
+    fs.writeFileSync(SETTINGS_PATH(), JSON.stringify(settingsCache));
+  } catch {
+    settingsCache = null; // drop the unsaved mutation; next read reloads from disk
+    return { ...readSettings(), saveFailed: true };
+  }
+  return readSettings();
 });
 
 ipcMain.handle('theme:save', (_e, t) => {
