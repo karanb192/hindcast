@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { costOf } from '../lib/pricing.js';
+import { buildResumeCmd } from '../lib/resume.js';
 
 const api = window.hindcast;
 
@@ -1220,14 +1221,6 @@ function CopyChip({ label, value, title, className = 'copy-chip' }) {
   );
 }
 
-// POSIX single-quote: closes the quote, escapes the quote char, reopens.
-const shellQuote = (p) => "'" + String(p).replace(/'/g, "'\\''") + "'";
-
-// split/join instead of replaceAll: paths may contain characters that are
-// special in a replacement string ($&, $')
-const buildResumeCmd = (template, cwd, sessionId) =>
-  template.split('{cwd}').join(shellQuote(cwd)).split('{sessionId}').join(sessionId);
-
 function SessionView({ sessionId, jumpToUuid, theme }) {
   const [data, setData] = useState(null);
   const [openAgent, setOpenAgent] = useState(null);
@@ -1235,6 +1228,7 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
   const [settings, setSettings] = useState(null);
   const [editingTpl, setEditingTpl] = useState(false);
   const [tplDraft, setTplDraft] = useState('');
+  const [saveErr, setSaveErr] = useState(false);
   const jumpedRef = useRef(null); // consume each jumpToUuid once, so returning from a subagent doesn't re-jump
 
   useEffect(() => {
@@ -1246,13 +1240,18 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
   const saveTpl = () => {
     api.saveSettings({ resumeTemplate: tplDraft }).then((s) => {
       setSettings(s);
-      setEditingTpl(false);
+      // A failed write leaves the editor open holding the draft, rather than
+      // closing as if the template had been saved.
+      if (s && s.saveFailed) setSaveErr(true);
+      else setEditingTpl(false);
     });
   };
 
   useEffect(() => {
     setData(null);
     setOpenAgent(null);
+    setEditingTpl(false); // a half-typed draft must not follow you to another session
+    setSaveErr(false);
     jumpedRef.current = null;
     let alive = true;
     api.readSession(sessionId).then((d) => { if (alive) setData(d); });
@@ -1313,7 +1312,11 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
               <span
                 className="reveal"
                 title="edit the resume command template"
-                onClick={() => { setTplDraft(settings.resumeTemplate); setEditingTpl((v) => !v); }}
+                onClick={() => {
+                  setTplDraft(settings.resumeTemplate);
+                  setSaveErr(false);
+                  setEditingTpl((v) => !v);
+                }}
               >✎</span>
             </>
           )}
@@ -1323,17 +1326,23 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
           {m.cwd && <span className="sep">·</span>}
           <CopyChip label={sessionId} value={sessionId} title="session id · click to copy" />
         </div>
-        {editingTpl && settings && (
+        {editingTpl && m.cwd && settings && (
           <div className="resume-edit">
             <input
               value={tplDraft}
               spellCheck={false}
+              autoFocus
+              maxLength={settings.templateMax || 500}
               onChange={(e) => setTplDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') saveTpl(); if (e.key === 'Escape') setEditingTpl(false); }}
             />
             <span className="reveal" onClick={saveTpl}>save</span>
             <span className="reveal" onClick={() => setTplDraft(settings.resumeTemplateDefault)}>reset</span>
-            <span className="re-hint">{'{cwd}'} inserts the directory shell-quoted · {'{sessionId}'} the id · aliases from your shell work here</span>
+            <span className="re-hint">
+              {saveErr
+                ? 'could not write settings, the template was not saved'
+                : <>{'{cwd}'} and {'{sessionId}'} are inserted shell-quoted · aliases from your shell work here</>}
+            </span>
           </div>
         )}
         {subs.length > 0 && (

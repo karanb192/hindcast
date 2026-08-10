@@ -94,9 +94,7 @@ function readTheme() {
 }
 
 const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
-// {cwd} is substituted shell-quoted; {sessionId} bare. The default is the
-// single source of truth here; the renderer gets it via settings:get.
-const RESUME_TEMPLATE_DEFAULT = 'cd {cwd} && claude --resume {sessionId}';
+const { RESUME_TEMPLATE_DEFAULT, TEMPLATE_MAX } = require('./lib/resume');
 let settingsCache = null;
 
 function readSettings() {
@@ -110,6 +108,7 @@ function readSettings() {
     resumeTemplate: typeof settingsCache.resumeTemplate === 'string' && settingsCache.resumeTemplate.trim()
       ? settingsCache.resumeTemplate : RESUME_TEMPLATE_DEFAULT,
     resumeTemplateDefault: RESUME_TEMPLATE_DEFAULT,
+    templateMax: TEMPLATE_MAX,
   };
 }
 
@@ -240,15 +239,28 @@ ipcMain.handle('settings:get', () => readSettings());
 
 ipcMain.handle('settings:save', (_e, s) => {
   if (!s || typeof s !== 'object') return readSettings();
-  if ('resumeTemplate' in s) {
+  // Re-read from disk before mutating, so a hand edit to settings.json made
+  // while the app is running is not clobbered by this write.
+  settingsCache = null;
+  readSettings();
+  if (Object.prototype.hasOwnProperty.call(s, 'resumeTemplate')) {
+    const t = typeof s.resumeTemplate === 'string' ? s.resumeTemplate.trim() : '';
+    // The editor input caps at TEMPLATE_MAX, so over-length only arrives from
+    // outside the UI; refuse it rather than truncating mid-placeholder.
+    if (t.length > TEMPLATE_MAX) return { ...readSettings(), saveFailed: true };
     // A cleared or default-valued template is stored as absent, so future
     // default changes reach users who never customized it.
-    const t = typeof s.resumeTemplate === 'string' ? s.resumeTemplate.trim().slice(0, 500) : '';
-    readSettings(); // loads settingsCache if this is the first touch
     if (t && t !== RESUME_TEMPLATE_DEFAULT) settingsCache.resumeTemplate = t;
     else delete settingsCache.resumeTemplate;
   }
-  try { fs.writeFileSync(SETTINGS_PATH(), JSON.stringify(settingsCache)); } catch {}
+  // Report what actually persisted: on a write failure the caller must not be
+  // told the new value is saved, or the UI shows it until the next launch.
+  try {
+    fs.writeFileSync(SETTINGS_PATH(), JSON.stringify(settingsCache));
+  } catch {
+    settingsCache = null; // drop the unsaved mutation; next read reloads from disk
+    return { ...readSettings(), saveFailed: true };
+  }
   return readSettings();
 });
 
