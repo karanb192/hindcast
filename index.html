@@ -5,13 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hindcast: browse, search, and replay your Claude Code sessions</title>
 <meta name="description" content="A local-first macOS app that indexes every Claude Code session on your Mac: full-text search, a scrubbable tape, a cost ledger, and one-paste resume.">
-<link rel="icon" href="assets/favicon.svg">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="canonical" href="https://hindcast.karanbansal.in/">
+<meta name="theme-color" content="#141210" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f3efe5" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
 <meta property="og:title" content="Hindcast">
 <meta property="og:description" content="Every Claude Code session you've ever run. Indexed, searchable, scrubbable.">
-<meta property="og:url" content="https://hindcast.karanbansal.in">
+<meta property="og:url" content="https://hindcast.karanbansal.in/">
+<meta property="og:image" content="https://hindcast.karanbansal.in/assets/session-dark.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Hindcast">
+<meta name="twitter:description" content="Browse, search, and replay every Claude Code session on your Mac. Local-first, one-paste resume.">
+<meta name="twitter:image" content="https://hindcast.karanbansal.in/assets/session-dark.png">
 <style>
   :root {
-    --bg: #f3efe5; --ink: #26211a; --muted: #6e6558; --brass: #8f7132;
+    --bg: #f3efe5; --ink: #26211a; --muted: #6e6558; --brass: #7a5f28;
     --card: #ece6d8; --line: #d8d0bf; --code-bg: #26211a; --code-ink: #e8e2d6;
   }
   @media (prefers-color-scheme: dark) {
@@ -72,16 +83,31 @@
     <a class="btn ghost" href="https://github.com/karanb192/hindcast/releases">Download DMG</a>
   </div>
 
-  <video controls preload="metadata" src="https://github.com/user-attachments/assets/3d784ee4-add6-4716-b668-877af637b925"></video>
+  <video controls preload="metadata" poster="assets/session-dark.png" aria-label="30-second demo of Hindcast" src="https://github.com/user-attachments/assets/3d784ee4-add6-4716-b668-877af637b925"></video>
 
   <div class="install">
-    <button class="copy" onclick="navigator.clipboard.writeText(document.getElementById('cmds').innerText).then(() => { this.textContent = 'copied'; setTimeout(() => this.textContent = 'copy', 1200); })">copy</button>
+    <button class="copy" onclick="(() => {
+      const done = () => { this.textContent = 'copied'; setTimeout(() => this.textContent = 'copy', 1200); };
+      const fallback = () => {
+        const r = document.createRange(); r.selectNodeContents(document.getElementById('cmds'));
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+        this.textContent = 'select + ⌘C';
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(document.getElementById('cmds').innerText).then(done, fallback);
+      else fallback();
+    })()">copy</button>
     <pre id="cmds">brew tap karanb192/tap
 brew trust karanb192/tap
 brew install --cask hindcast
 xattr -rd com.apple.quarantine /Applications/Hindcast.app</pre>
   </div>
-  <p class="note">Apple Silicon. The <code>xattr</code> line is a one-time step until the app is notarized.</p>
+  <p class="note">Apple Silicon. The <code>xattr</code> line is a one-time step until the app is
+  notarized (Developer ID enrollment in progress). ripgrep comes along as a cask dependency;
+  if you grab the DMG instead, <code>brew install ripgrep</code> enables full-text search.</p>
+  <p class="note">Claude Code deletes transcripts after 30 days by default
+  (<code>cleanupPeriodDays</code> in <code>~/.claude/settings.json</code>).
+  Hindcast can only index what still exists, so raise it before the pruner gets to your history.</p>
 
   <div class="props">
     <div><b>&#8984;K search</b> across every transcript, tool output included; results jump the tape to the matched event.</div>
@@ -90,7 +116,8 @@ xattr -rd com.apple.quarantine /Applications/Hindcast.app</pre>
     <div><b>Read-only</b>: no API keys, no network calls, no telemetry. It reads files on disk, and that's the whole trick.</div>
   </div>
 
-  <img class="shot" src="assets/session-dark.png" alt="A Claude Code session on the Hindcast tape">
+  <img class="shot" src="assets/session-dark.png" alt="A Claude Code session on the Hindcast tape"
+    width="2880" height="1880" loading="lazy" decoding="async">
 
   <footer>MIT · <a href="https://github.com/karanb192/hindcast">github.com/karanb192/hindcast</a> · by <a href="https://karanbansal.in">Karan Bansal</a></footer>
 </main>
