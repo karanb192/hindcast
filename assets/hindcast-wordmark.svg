@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 156">
+  <title>Hindcast: The Spool (wordmark)</title>
+  <!-- Brass spool with the tape lead running toward the name.
+       Colors adapt to paper / darkroom grounds. -->
+  <style>
+    .brass-line { stroke: #8F7132; }
+    .brass-fill { fill: #8F7132; }
+    .ink        { fill: #26211A; }
+    @media (prefers-color-scheme: dark) {
+      .brass-line { stroke: #C9A96A; }
+      .brass-fill { fill: #C9A96A; }
+      .ink        { fill: #E8E2D6; }
+    }
+  </style>
+  <g transform="translate(53.5,72.2) scale(0.9)">
+    <path class="brass-line" fill="none" stroke-width="6" stroke-linecap="round" d="
+      M48 40H0
+      A33.5 33.5 0 0 1 0 -27
+      A22.5 22.5 0 0 1 0 18
+      A15 15 0 0 1 0 -12"/>
+    <circle class="brass-fill" r="5.5"/>
+  </g>
+  <text class="ink" x="126" y="108" font-family="Georgia, 'Times New Roman', serif"
+        font-size="88" letter-spacing="-1">Hindcast</text>
+</svg>

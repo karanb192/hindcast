@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hindcast: browse, search, and replay your Claude Code sessions</title>
+<meta name="description" content="A local-first macOS app that indexes every Claude Code session on your Mac: full-text search, a scrubbable tape, a cost ledger, and one-paste resume.">
+<link rel="icon" href="assets/favicon.svg">
+<meta property="og:title" content="Hindcast">
+<meta property="og:description" content="Every Claude Code session you've ever run. Indexed, searchable, scrubbable.">
+<meta property="og:url" content="https://hindcast.karanbansal.in">
+<style>
+  :root {
+    --bg: #f3efe5; --ink: #26211a; --muted: #6e6558; --brass: #8f7132;
+    --card: #ece6d8; --line: #d8d0bf; --code-bg: #26211a; --code-ink: #e8e2d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141210; --ink: #e8e2d6; --muted: #98907f; --brass: #c9a96a;
+      --card: #1d1a16; --line: #2e2922; --code-bg: #0d0c0a; --code-ink: #ddd5c4;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: ui-serif, "New York", Georgia, serif;
+    line-height: 1.55;
+  }
+  main { max-width: 880px; margin: 0 auto; padding: 56px 24px 80px; }
+  .wordmark { display: block; height: 72px; margin: 0 auto 28px; }
+  h1 { font-size: 1.7rem; font-weight: 600; text-align: center; letter-spacing: -0.01em; }
+  .sub { text-align: center; color: var(--muted); max-width: 620px; margin: 14px auto 0; font-size: 1.06rem; }
+  .sub code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+  .actions { display: flex; gap: 14px; justify-content: center; margin: 30px 0 8px; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 10px 22px; border-radius: 8px; text-decoration: none;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.95rem;
+  }
+  .btn.primary { background: var(--brass); color: var(--bg); }
+  .btn.ghost { border: 1px solid var(--brass); color: var(--brass); }
+  video, .shot { width: 100%; border-radius: 10px; border: 1px solid var(--line); margin-top: 44px; display: block; }
+  .install {
+    margin-top: 44px; background: var(--code-bg); color: var(--code-ink);
+    border-radius: 10px; padding: 20px 22px; position: relative; overflow-x: auto;
+  }
+  .install pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9rem; line-height: 1.7; }
+  .install .cmt { opacity: 0.55; }
+  .copy {
+    position: absolute; top: 12px; right: 12px; border: 1px solid var(--brass);
+    background: transparent; color: var(--brass); border-radius: 6px; padding: 4px 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.8rem; cursor: pointer;
+  }
+  .note { color: var(--muted); font-size: 0.92rem; margin-top: 14px; text-align: center; }
+  .props { margin: 52px 0 0; display: grid; gap: 10px 26px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 640px) { .props { grid-template-columns: 1fr; } }
+  .props div { padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; font-size: 0.97rem; }
+  .props b { color: var(--brass); font-weight: 600; }
+  footer { margin-top: 64px; text-align: center; color: var(--muted); font-size: 0.9rem; }
+  footer a { color: var(--brass); text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <img class="wordmark" src="assets/hindcast-wordmark.svg" alt="Hindcast">
+  <h1>Every Claude Code session you've ever run.<br>Indexed, searchable, scrubbable.</h1>
+  <p class="sub">Find that session from three weeks ago, scrub through what the agent did,
+  and resume it in your terminal with one paste. Local-first: it reads the transcripts
+  Claude Code already writes to <code>~/.claude/projects/</code>, and nothing leaves your Mac.</p>
+
+  <div class="actions">
+    <a class="btn primary" href="https://github.com/karanb192/hindcast">GitHub</a>
+    <a class="btn ghost" href="https://github.com/karanb192/hindcast/releases">Download DMG</a>
+  </div>
+
+  <video controls preload="metadata" src="https://github.com/user-attachments/assets/3d784ee4-add6-4716-b668-877af637b925"></video>
+
+  <div class="install">
+    <button class="copy" onclick="navigator.clipboard.writeText(document.getElementById('cmds').innerText).then(() => { this.textContent = 'copied'; setTimeout(() => this.textContent = 'copy', 1200); })">copy</button>
+    <pre id="cmds">brew tap karanb192/tap
+brew trust karanb192/tap
+brew install --cask hindcast
+xattr -rd com.apple.quarantine /Applications/Hindcast.app</pre>
+  </div>
+  <p class="note">Apple Silicon. The <code>xattr</code> line is a one-time step until the app is notarized.</p>
+
+  <div class="props">
+    <div><b>&#8984;K search</b> across every transcript, tool output included; results jump the tape to the matched event.</div>
+    <div><b>Resume</b> any session: one chip copies <code>cd</code> + <code>claude --resume</code>, template editable for your aliases.</div>
+    <div><b>The Ledger</b>: usage and estimated cost per day, week, month, and model, deduplicated the way ccusage does it.</div>
+    <div><b>Read-only</b>: no API keys, no network calls, no telemetry. It reads files on disk, and that's the whole trick.</div>
+  </div>
+
+  <img class="shot" src="assets/session-dark.png" alt="A Claude Code session on the Hindcast tape">
+
+  <footer>MIT · <a href="https://github.com/karanb192/hindcast">github.com/karanb192/hindcast</a> · by <a href="https://karanbansal.in">Karan Bansal</a></footer>
+</main>
+</body>
+</html>
