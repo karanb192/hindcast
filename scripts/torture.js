@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { parseSession, extractMeta, foldSubagentUsage, claimSessionSkills } = require('../lib/scanner');
+const { parseSession, extractMeta, foldSubagentUsage, claimSessionSkills, BUILTIN_COMMANDS } = require('../lib/scanner');
 const { search } = require('../lib/search');
 const { exportSession } = require('../lib/export');
 const { costOf, priceFor } = require('../lib/pricing');
@@ -28,6 +28,7 @@ async function check(name, fn) {
 }
 
 // ---------- fixtures ----------
+const LONG_SKILL_NAME = 'skill-' + 'x'.repeat(20000);
 const FIXTURES = {
   empty: '',
   whitespace: '\n\n   \n\t\n',
@@ -91,6 +92,26 @@ const FIXTURES = {
     { type: 'user', uuid: 'u-real2', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-message>job-apply</command-message>\n<command-name>/job-apply</command-name>' } },
     { type: 'system', subtype: 'local_command', isMeta: false, uuid: 'sc8', timestamp: new Date(2026, 0, 2).toISOString(), content: '<command-name>/rename</command-name>\n            <command-message>rename</command-message>\n            <command-args>billi</command-args>' },
     { type: 'system', subtype: 'local_command', isMeta: false, uuid: 'sc9', timestamp: new Date(2026, 0, 2).toISOString(), content: '<local-command-stdout>Session renamed to: billi</local-command-stdout>' }
+  ),
+  // Skill extraction: a typed invocation as it lands on disk. The carrier
+  // (newer writers put <command-message> FIRST) counts; the followers never
+  // do: the realistic isMeta expansion, a drift-shaped isMeta line quoting
+  // the wrapper verbatim, and a compaction summary quoting it mid-text.
+  skillCarrierPair: j(
+    { type: 'user', uuid: 'cp1', timestamp: new Date(2026, 0, 4).toISOString(), message: { role: 'user', content: '<command-message>humanizer</command-message>\n<command-name>/humanizer</command-name>' } },
+    { type: 'user', uuid: 'cp2', isMeta: true, timestamp: new Date(2026, 0, 4).toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'Base directory for this skill: /Users/x/.claude/skills/humanizer\n\n# Humanizer\nScrub outbound text.' }] } },
+    { type: 'user', uuid: 'cp3', isMeta: true, timestamp: new Date(2026, 0, 4).toISOString(), message: { role: 'user', content: '<command-message>humanizer</command-message>\n<command-name>/humanizer</command-name>' } },
+    { type: 'user', uuid: 'cp4', isCompactSummary: true, timestamp: new Date(2026, 0, 4).toISOString(), message: { role: 'user', content: 'This session is being continued from a previous conversation. The user ran <command-name>/humanizer</command-name> before compaction.' } }
+  ),
+  // Skill extraction: hostile names must stay inert data. Typed names cannot
+  // carry spaces or angle brackets (the tag regex stops at both), so the
+  // typed probe is scheme-shaped; the Skill tool path takes input.skill
+  // verbatim, so it gets the markup, unicode, and length payloads.
+  hostileSkillNames: j(
+    { type: 'assistant', uuid: 'h1', timestamp: new Date(2026, 0, 5).toISOString(), message: { role: 'assistant', id: 'msg_h1', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [{ type: 'tool_use', id: 'ht1', name: 'Skill', input: { skill: '<img src=x onerror=alert(1)>' } }] } },
+    { type: 'assistant', uuid: 'h2', timestamp: new Date(2026, 0, 5).toISOString(), message: { role: 'assistant', id: 'msg_h2', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [{ type: 'tool_use', id: 'ht2', name: 'Skill', input: { skill: '日本語スキル🎉\u0000null-byte' } }] } },
+    { type: 'assistant', uuid: 'h3', timestamp: new Date(2026, 0, 5).toISOString(), message: { role: 'assistant', id: 'msg_h3', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [{ type: 'tool_use', id: 'ht3', name: 'Skill', input: { skill: LONG_SKILL_NAME } }] } },
+    { type: 'user', uuid: 'h4', timestamp: new Date(2026, 0, 5).toISOString(), message: { role: 'user', content: '<command-name>/javascript:alert(1)</command-name>\n<command-message>x</command-message>' } }
   ),
 };
 
@@ -166,6 +187,84 @@ const SKILL_FORK = SKILL_PARENT + '\n' + j(
       throw new Error('fork must keep only its new invocation: ' + JSON.stringify(fork.skills));
     }
     if (fork.skillRecords !== undefined) throw new Error('raw skillRecords must not ship');
+  });
+  await check('skills: carrier counts once, its followers never', async () => {
+    const m = await extractMeta(writeFixture('skillCarrier2', FIXTURES.skillCarrierPair));
+    const recs = m.skillRecords || [];
+    if (recs.length !== 1 || recs[0].n !== 'humanizer' || recs[0].t !== 'user' || recs[0].u !== 'cp1') {
+      throw new Error('expected one carrier record from cp1, got ' + JSON.stringify(recs));
+    }
+  });
+  await check('skills: hostile names pass through unmutated and claim cleanly', async () => {
+    const m = await extractMeta(writeFixture('skillHostile2', FIXTURES.hostileSkillNames));
+    const names = (m.skillRecords || []).map((r) => r.n);
+    const want = ['<img src=x onerror=alert(1)>', '日本語スキル🎉 null-byte', LONG_SKILL_NAME, 'javascript:alert(1)'];
+    if (JSON.stringify(names) !== JSON.stringify(want)) {
+      throw new Error('names mutated: ' + JSON.stringify(names.map((n) => n.slice(0, 40))));
+    }
+    claimSessionSkills(m, new Set());
+    if (m.skills.length !== 4 || m.skills[2].n.length !== LONG_SKILL_NAME.length) {
+      throw new Error('claim mangled hostile names');
+    }
+  });
+  await check('skills: duplicated line inside one file claims once', async () => {
+    // Crash recovery can rewrite a line verbatim; the claim set, not the
+    // per-file scan, is what keeps the count at one.
+    const line = j({ type: 'user', uuid: 'dupline1', timestamp: new Date(2026, 0, 6).toISOString(), message: { role: 'user', content: '<command-name>/blog-review</command-name>\n<command-message>blog-review</command-message>' } });
+    const m = await extractMeta(writeFixture('skillDupLine', line + '\n' + line));
+    if ((m.skillRecords || []).length !== 2) throw new Error('both raw lines should record');
+    claimSessionSkills(m, new Set());
+    if (m.skills.length !== 1) throw new Error('duplicate uuid must claim once, got ' + m.skills.length);
+  });
+  await check('skills: global claim is a pure function of the file set', async () => {
+    // Mirrors the byAge walk in buildIndex: firstTs, then filePath. A fork
+    // copies its parent verbatim so both files share firstTs, and only the
+    // filePath tiebreak keeps attribution identical run to run.
+    const pPath = writeFixture('skillOrderB-parent', SKILL_PARENT);
+    const fPath = writeFixture('skillOrderA-fork', SKILL_FORK);
+    const claimAll = async (paths) => {
+      const metas = [];
+      for (const fp of paths) {
+        const m = await extractMeta(fp);
+        m.filePath = fp;
+        metas.push(m);
+      }
+      metas.sort((a, b) =>
+        ((a.firstTs || Infinity) - (b.firstTs || Infinity)) || a.filePath.localeCompare(b.filePath));
+      const claimed = new Set();
+      const out = {};
+      for (const m of metas) {
+        claimSessionSkills(m, claimed);
+        out[path.basename(m.filePath, '.jsonl')] = m.skills.map((r) => r.u);
+      }
+      return out;
+    };
+    const run1 = await claimAll([pPath, fPath]);
+    const run2 = await claimAll([fPath, pPath]);
+    if (JSON.stringify(run1) !== JSON.stringify(run2)) {
+      throw new Error('attribution depends on walk order:\n    ' + JSON.stringify(run1) + '\n    ' + JSON.stringify(run2));
+    }
+    const all = Object.values(run1).flat();
+    if (all.length !== 3 || new Set(all).size !== 3) {
+      throw new Error('each invocation must be claimed exactly once: ' + JSON.stringify(run1));
+    }
+  });
+  await check('skills: builtins never land in s.skills; typed spellings stay classifiable', async () => {
+    const m = await extractMeta(writeFixture('builtinPair', j(
+      { type: 'system', subtype: 'local_command', isMeta: false, uuid: 'bp1', timestamp: new Date(2026, 0, 7).toISOString(), content: '<command-name>/compact</command-name>\n<command-message>compact</command-message>' },
+      { type: 'system', subtype: 'local_command', isMeta: false, uuid: 'bp2', timestamp: new Date(2026, 0, 7).toISOString(), content: '<local-command-stdout>Compacted</local-command-stdout>' }
+    )));
+    claimSessionSkills(m, new Set());
+    if (m.skills.length !== 0 || m.builtins.compact !== 1) {
+      throw new Error('local_command must land only in s.builtins: ' + JSON.stringify({ skills: m.skills, builtins: m.builtins }));
+    }
+    // Builtins the real archive delivered as plain user lines ship on
+    // s.skills undistinguished; BUILTIN_COMMANDS membership is the only
+    // fence keeping them out of the renderer's skill table.
+    for (const n of ['model', 'compact', 'effort', 'plugin', 'login', 'context', 'mcp', 'add-dir',
+      'rename', 'workflows', 'fork', 'skills', 'remote-control', 'reload-skills', 'reload-plugins']) {
+      if (!BUILTIN_COMMANDS.has(n)) throw new Error('BUILTIN_COMMANDS lost "' + n + '"');
+    }
   });
   await check('skills: typed command stays a visible reel event (tape jump target)', async () => {
     const r = await parseSession(writeFixture('skillTyped', SKILL_PARENT));
