@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { parseSession, extractMeta, foldSubagentUsage, claimSkillRecords } = require('../lib/scanner');
+const { parseSession, extractMeta, foldSubagentUsage, claimSessionSkills } = require('../lib/scanner');
 const { search } = require('../lib/search');
 const { exportSession } = require('../lib/export');
 const { costOf, priceFor } = require('../lib/pricing');
@@ -75,8 +75,10 @@ const FIXTURES = {
       { type: 'tool_use', id: 's7', name: 'Skill', input: { skill: 'no-timestamp-skipped' } },
     ] } }
   ),
-  // Skill extraction: lines that quote or wrap command names but must not count.
-  // Only u-real counts (one typed record).
+  // Skill extraction: lines that quote or wrap command names. isMeta,
+  // sidechain, compaction-summary, and mid-text quotes never count; typed
+  // builtins, local_command builtins, and hostile names are recorded and
+  // left to classification at aggregation time.
   skillFalsePositives: j(
     { type: 'user', uuid: 'sc1', isCompactSummary: true, timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>/humanizer</command-name>\n<command-message>humanizer</command-message>' } },
     { type: 'user', uuid: 'sc2', isMeta: true, timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>/humanizer</command-name>' } },
@@ -86,7 +88,9 @@ const FIXTURES = {
     { type: 'assistant', uuid: 'sc6', isSidechain: true, timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'assistant', id: 'msg_sc6', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [{ type: 'tool_use', id: 'sct1', name: 'Skill', input: { skill: 'from-a-sidechain' } }] } },
     { type: 'user', uuid: 'sc7', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>(.*?)</command-name>' } },
     { type: 'user', uuid: 'u-real', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>/blog-review</command-name>\n<command-message>blog-review</command-message>\n<command-args>the draft</command-args>' } },
-    { type: 'user', uuid: 'u-real2', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-message>job-apply</command-message>\n<command-name>/job-apply</command-name>' } }
+    { type: 'user', uuid: 'u-real2', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-message>job-apply</command-message>\n<command-name>/job-apply</command-name>' } },
+    { type: 'system', subtype: 'local_command', isMeta: false, uuid: 'sc8', timestamp: new Date(2026, 0, 2).toISOString(), content: '<command-name>/rename</command-name>\n            <command-message>rename</command-message>\n            <command-args>billi</command-args>' },
+    { type: 'system', subtype: 'local_command', isMeta: false, uuid: 'sc9', timestamp: new Date(2026, 0, 2).toISOString(), content: '<local-command-stdout>Session renamed to: billi</local-command-stdout>' }
   ),
 };
 
@@ -130,20 +134,24 @@ const SKILL_FORK = SKILL_PARENT + '\n' + j(
     const m = await extractMeta(writeFixture('skillsMalformed', FIXTURES.malformedSkillBlocks));
     const recs = m.skillRecords || [];
     if (recs.length !== 1) throw new Error('expected 1 record, got ' + recs.length);
-    if (recs[0].skill !== 'real-skill' || recs[0].by !== 'claude' || recs[0].u !== 'sa1') {
+    if (recs[0].n !== 'real-skill' || recs[0].t !== 'claude' || recs[0].u !== 'sa1') {
       throw new Error('wrong record: ' + JSON.stringify(recs[0]));
     }
   });
-  await check('skills: compaction/meta/sidechain/builtin/mid-text never count', async () => {
+  await check('skills: meta/sidechain/compaction/mid-text never count; builtins split off', async () => {
     const m = await extractMeta(writeFixture('skillsFalsePos', FIXTURES.skillFalsePositives));
-    const recs = m.skillRecords || [];
-    if (recs.length !== 2) throw new Error('expected 2 records, got ' + JSON.stringify(recs));
-    if (recs[0].skill !== 'blog-review' || recs[0].by !== 'typed' || recs[0].cid !== 'u-real') {
-      throw new Error('wrong record: ' + JSON.stringify(recs[0]));
-    }
-    // Older transcripts put <command-message> before <command-name>.
-    if (recs[1].skill !== 'job-apply' || recs[1].cid !== 'u-real2') {
-      throw new Error('message-first wrapper order missed: ' + JSON.stringify(recs[1]));
+    const got = (m.skillRecords || []).map((r) => r.n + '|' + r.t + '|' + r.u).join(', ');
+    const want = [
+      'model|user|sc4',         // typed builtin: recorded, classified at aggregation
+      '(.*?)|user|sc7',         // hostile name passes through as inert data
+      'blog-review|user|u-real',
+      'job-apply|user|u-real2', // message-first wrapper order
+      'rename|builtin|sc8',     // local_command carrier; the stdout twin sc9 must not count
+    ].join(', ');
+    if (got !== want) throw new Error('records mismatch:\n    got  ' + got + '\n    want ' + want);
+    claimSessionSkills(m, new Set());
+    if (m.skills.length !== 4 || m.builtins.rename !== 1) {
+      throw new Error('claim split wrong: ' + JSON.stringify({ skills: m.skills, builtins: m.builtins }));
     }
   });
   await check('skills: forked session copies count once (global claim)', async () => {
@@ -151,13 +159,13 @@ const SKILL_FORK = SKILL_PARENT + '\n' + j(
     const fork = await extractMeta(writeFixture('skillFork2', SKILL_FORK));
     if (parent.skillRecords.length !== 2) throw new Error('parent should see 2, got ' + parent.skillRecords.length);
     if (fork.skillRecords.length !== 3) throw new Error('fork should see 3 pre-claim, got ' + fork.skillRecords.length);
-    claimSkillRecords([parent, fork]); // oldest first, as buildIndex sorts
-    const total = parent.skillRecords.length + fork.skillRecords.length;
-    if (total !== 3) throw new Error('expected 3 claimed total, got ' + total);
-    if (fork.skillRecords.length !== 1 || fork.skillRecords[0].u !== 'fb2') {
-      throw new Error('fork must keep only its new invocation: ' + JSON.stringify(fork.skillRecords));
+    const claimed = new Set();
+    claimSessionSkills(parent, claimed); // oldest first, as the byAge loop walks
+    claimSessionSkills(fork, claimed);
+    if (parent.skills.length !== 2 || fork.skills.length !== 1 || fork.skills[0].u !== 'fb2') {
+      throw new Error('fork must keep only its new invocation: ' + JSON.stringify(fork.skills));
     }
-    if (fork.skillRecords[0].cid !== undefined) throw new Error('cid must be dropped from shipped records');
+    if (fork.skillRecords !== undefined) throw new Error('raw skillRecords must not ship');
   });
   await check('skills: typed command stays a visible reel event (tape jump target)', async () => {
     const r = await parseSession(writeFixture('skillTyped', SKILL_PARENT));
