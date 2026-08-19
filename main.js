@@ -6,7 +6,7 @@ const { search } = require('./lib/search');
 const { exportSession } = require('./lib/export');
 
 let win = null;
-let index = { projects: [], sessions: [], skills: [] };
+let index = { projects: [], sessions: [], skillInventory: [] };
 let sessionsById = new Map();
 let indexing = false;
 
@@ -178,7 +178,7 @@ ipcMain.handle('index:get', () => {
   return {
     projects: index.projects,
     sessions: index.sessions.map((s) => ({ ...s })),
-    skills: index.skills || [],
+    skillInventory: index.skillInventory || [],
     indexing,
   };
 });
