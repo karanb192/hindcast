@@ -597,6 +597,46 @@ body {
   font-size: 12.5px; color: var(--putty); max-width: 70ch; margin: 0;
 }
 
+/* ── skills panel (inside the ledger) ── */
+
+.skills-lede {
+  font-family: var(--mono); font-size: 11px; color: var(--putty);
+  margin-bottom: 12px;
+}
+.skills-dead {
+  display: flex; gap: 10px; align-items: baseline;
+  font-family: var(--mono); font-size: 10.5px;
+  margin-bottom: 8px;
+}
+.skills-dead .flag {
+  flex-shrink: 0;
+  font-size: 8.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--error);
+  border: 1px solid currentColor; border-radius: 99px;
+  padding: 1px 7px;
+  opacity: 0.85;
+}
+.skills-dead.idle .flag { color: var(--putty-dim); }
+.skills-dead .names { color: var(--ink-dim); line-height: 1.8; }
+.skills-dead .names .when { color: var(--putty-dim); }
+.skill-name {
+  color: var(--ink-dim); cursor: default;
+  border-bottom: 1px dotted var(--putty-dim);
+}
+.skill-name:hover { color: var(--brass); border-color: var(--brass); }
+.skill-name.on { color: var(--brass); border-bottom: 1px solid var(--brass); }
+.skill-name.ghost { opacity: 0.6; }
+.ledger-table th.trend-h { text-align: left; }
+.ledger-table td.trend { width: 84px; }
+.trend-strip {
+  display: inline-flex; align-items: flex-end; gap: 2px; height: 14px;
+}
+.trend-bar {
+  display: inline-block; width: 4px; border-radius: 1px;
+  background: var(--brass-dim);
+}
+.trend-bar.zero { background: var(--line); }
+
 /* ── the tape (signature element) ── */
 
 .tape-wrap { padding: 16px 32px 0; }

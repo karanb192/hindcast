@@ -632,7 +632,212 @@ function periodLabel(key, group) {
   return group === 'week' ? 'wk of ' + label : label;
 }
 
-function Ledger({ sessions, dayInRange, modelFilter }) {
+// ---------- skills (inside the ledger) ----------
+
+const dayKeyOf = (ts) => {
+  const d = new Date(ts);
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+};
+
+const skillDayLabel = (d) => d ? fmtDate(new Date(d + 'T12:00:00').getTime()) : '';
+
+// Fold usage ids onto inventory ids: a typed command can use a plugin skill's
+// bare name ("/leaderboard" for context-hogs:leaderboard). When a bare id is
+// not itself installed and exactly one installed plugin skill ends with
+// ":<id>", treat them as the same skill.
+function makeCanon(inventory) {
+  const ids = new Set(inventory.map((s) => s.id));
+  const bySuffix = new Map();
+  for (const s of inventory) {
+    const i = s.id.indexOf(':');
+    if (i > 0) {
+      const suf = s.id.slice(i + 1);
+      bySuffix.set(suf, bySuffix.has(suf) ? null : s.id); // null = ambiguous
+    }
+  }
+  return (id) => {
+    if (id.includes(':') || ids.has(id)) return id;
+    return bySuffix.get(id) || id;
+  };
+}
+
+// skill id -> { claude, typed, sessions:Set, first, last, months:Map, jump:Map }
+function aggregateSkills(sessions, dayOk, canon) {
+  const map = new Map();
+  for (const s of sessions) {
+    for (const r of (s.skillRecords || [])) {
+      if (!r || !r.skill || !dayOk(r.d)) continue;
+      const id = canon(r.skill);
+      let a = map.get(id);
+      if (!a) {
+        a = { id, claude: 0, typed: 0, sessions: new Set(), first: null, last: null, months: new Map(), jump: new Map() };
+        map.set(id, a);
+      }
+      if (r.by === 'typed') a.typed++; else a.claude++;
+      a.sessions.add(s.id);
+      if (!a.first || r.d < a.first) a.first = r.d;
+      if (!a.last || r.d > a.last) a.last = r.d;
+      const mk = r.d.slice(0, 7);
+      a.months.set(mk, (a.months.get(mk) || 0) + 1);
+      // One representative event per session for the tape jump; prefer a
+      // Claude-invoked record because tool events always render on the reel.
+      const cur = a.jump.get(s.id);
+      if (!cur || (r.by === 'claude' && cur.by !== 'claude')) a.jump.set(s.id, { u: r.u, by: r.by });
+    }
+  }
+  return map;
+}
+
+// The scope seam: the lede and the dead lists above the table are all-time
+// inventory truth; the table and the notes under it follow the active
+// project, date, and model filters. "Never fired" only ever means all-time.
+function SkillsSection({ sessions, allSessions, dayInRange, skillInventory, activeSkillId, onToggleSkill }) {
+  const canon = useMemo(() => makeCanon(skillInventory), [skillInventory]);
+  const allTime = useMemo(
+    () => aggregateSkills(allSessions, () => true, canon),
+    [allSessions, canon]
+  );
+  const scoped = useMemo(
+    () => aggregateSkills(sessions, dayInRange || (() => true), canon),
+    [sessions, dayInRange, canon]
+  );
+
+  // Last 12 calendar months, oldest first, as fixed trend slots.
+  const monthSlots = useMemo(() => {
+    const now = new Date();
+    const out = [];
+    for (let i = 11; i >= 0; i--) {
+      const m = new Date(now.getFullYear(), now.getMonth() - i, 15);
+      out.push(m.getFullYear() + '-' + String(m.getMonth() + 1).padStart(2, '0'));
+    }
+    return out;
+  }, []);
+
+  const installedIds = useMemo(() => new Set(skillInventory.map((s) => s.id)), [skillInventory]);
+  const neverFired = skillInventory.filter((s) => !allTime.has(s.id)).map((s) => s.id);
+  const idleCutoff = dayKeyOf(Date.now() - 60 * 864e5);
+  const idle = skillInventory
+    .filter((s) => allTime.has(s.id) && allTime.get(s.id).last < idleCutoff)
+    .map((s) => ({ id: s.id, last: allTime.get(s.id).last }));
+
+  let allInvocations = 0;
+  for (const a of allTime.values()) allInvocations += a.claude + a.typed;
+  const firedInstalled = skillInventory.length - neverFired.length;
+
+  const rows = [...scoped.values()]
+    .sort((a, b) => ((b.claude + b.typed) - (a.claude + a.typed)) || a.id.localeCompare(b.id));
+  const outsideScope = [...allTime.keys()].filter((id) => !scoped.has(id)).length;
+
+  if (skillInventory.length === 0 && allTime.size === 0) {
+    return (
+      <div className="ledger-note">
+        nothing installed under ~/.claude/skills, and no skill invocation anywhere in the archive
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="skills-lede">
+        {skillInventory.length} installed · {firedInstalled} fired all-time
+        · {allInvocations.toLocaleString()} invocation{allInvocations === 1 ? '' : 's'} in the archive
+      </div>
+      {neverFired.length > 0 && (
+        <div className="skills-dead">
+          <span className="flag">never fired</span>
+          <span className="names">{neverFired.join(' · ')}</span>
+        </div>
+      )}
+      {idle.length > 0 && (
+        <div className="skills-dead idle">
+          <span className="flag">idle 60+ days</span>
+          <span className="names">
+            {idle.map((s, i) => (
+              <span key={s.id}>
+                {i > 0 && ' · '}{s.id} <span className="when">{skillDayLabel(s.last)}</span>
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
+      {rows.length > 0 && (
+        <div className="ledger-table-wrap">
+          <table className="ledger-table">
+            <thead><tr>
+              <th className="l">skill</th><th>claude</th><th>typed</th>
+              <th>sessions</th><th>first</th><th>last</th><th>uses</th><th className="l trend-h">12 mo</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((a) => {
+                const rowMax = Math.max(...monthSlots.map((mk) => a.months.get(mk) || 0), 1);
+                return (
+                  <tr key={a.id}>
+                    <td className="l">
+                      <span
+                        className={'skill-name' + (activeSkillId === a.id ? ' on' : '') + (installedIds.has(a.id) ? '' : ' ghost')}
+                        title={installedIds.has(a.id)
+                          ? 'show the sessions where ' + a.id + ' fired'
+                          : a.id + ' is not installed now · show its sessions'}
+                        onClick={() => onToggleSkill(
+                          a.id,
+                          a.sessions,
+                          new Map([...a.jump].map(([sid, v]) => [sid, v.u]))
+                        )}
+                      >{a.id}</span>
+                    </td>
+                    <td>{a.claude || ''}</td>
+                    <td>{a.typed || ''}</td>
+                    <td>{a.sessions.size}</td>
+                    <td>{skillDayLabel(a.first)}</td>
+                    <td>{skillDayLabel(a.last)}</td>
+                    <td className="cost">{a.claude + a.typed}</td>
+                    <td className="trend">
+                      <span className="trend-strip">
+                        {monthSlots.map((mk) => {
+                          const v = a.months.get(mk) || 0;
+                          return (
+                            <span
+                              key={mk}
+                              className={'trend-bar' + (v ? '' : ' zero')}
+                              style={{ height: (v ? Math.max(3, Math.round((v / rowMax) * 14)) : 2) + 'px' }}
+                              title={mk + ': ' + v}
+                            />
+                          );
+                        })}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rows.length === 0 && (
+        <div className="ledger-note">
+          {allTime.size > 0
+            ? 'no skill invocations in this scope'
+            : 'no skill invocations anywhere in the archive yet'}
+        </div>
+      )}
+      {rows.length > 0 && outsideScope > 0 && (
+        <div className="ledger-note">
+          {outsideScope} more skill{outsideScope === 1 ? '' : 's'} fired outside this scope
+        </div>
+      )}
+      {activeSkillId && (
+        <div className="ledger-note">
+          session list narrowed to {activeSkillId} · open a session to land on the
+          invocation · click the skill again to clear
+        </div>
+      )}
+    </>
+  );
+}
+
+function Ledger({ sessions, allSessions, dayInRange, modelFilter, skillInventory, activeSkillId, onToggleSkill }) {
   const [group, setGroup] = useState('day');
   const dayOk = dayInRange || (() => true);
   const modelOk = (m) => !modelFilter || modelFilter.size === 0 || modelFilter.has(m);
@@ -754,6 +959,18 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
       </div>
 
       <div className="archive-section">
+        <h3>Skills</h3>
+        <SkillsSection
+          sessions={sessions}
+          allSessions={allSessions || sessions}
+          dayInRange={dayInRange}
+          skillInventory={skillInventory || []}
+          activeSkillId={activeSkillId}
+          onToggleSkill={onToggleSkill}
+        />
+      </div>
+
+      <div className="archive-section">
         <h3>
           Over time
           <span className="ledger-groups">
@@ -802,7 +1019,11 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
         <p className="ledger-method">
           Cost = input + output at each model's published $/MTok, cache reads at 0.1×, cache
           writes at 1.25× (5-minute) and 2× (1-hour) input rate. Usage is deduplicated by API
-          message id. Models without a known price are counted in tokens but excluded from cost.
+          message id. Models without a known price are counted in tokens but excluded from
+          cost. Skill counts come from Skill tool calls and typed /commands in the transcripts,
+          deduplicated across forked and resumed sessions by invocation id; sidechains, meta
+          lines, and compaction summaries are excluded, and the counts reach only as far as
+          the transcripts still on disk.
         </p>
       </div>
     </div>
@@ -1481,6 +1702,19 @@ const sameTokens = (a, b) =>
   a.input === b.input && a.output === b.output &&
   a.cacheRead === b.cacheRead && a.cacheWrite === b.cacheWrite;
 
+// Global claiming can move a skill record between files without touching the
+// file itself (a restored older transcript claims ids a newer fork held), so
+// records are compared, not assumed stable under mtime+size.
+const sameSkillRecords = (a, b) => {
+  const ra = a.skillRecords || [], rb = b.skillRecords || [];
+  if (ra.length !== rb.length) return false;
+  for (let i = 0; i < ra.length; i++) {
+    if (ra[i].skill !== rb[i].skill || ra[i].by !== rb[i].by ||
+        ra[i].d !== rb[i].d || ra[i].u !== rb[i].u) return false;
+  }
+  return true;
+};
+
 function mergeIndex(prev, next) {
   const prevSessions = new Map(prev.sessions.map((s) => [s.id, s]));
   let sessionsSame = prev.sessions.length === next.sessions.length;
@@ -1491,7 +1725,7 @@ function mergeIndex(prev, next) {
     // its project attribution alive.
     if (p && p.mtime === s.mtime && p.size === s.size && p.filePath === s.filePath &&
         p.title === s.title && p.lastTs === s.lastTs && p.toolCalls === s.toolCalls &&
-        sameTokens(p.tokens, s.tokens)) {
+        sameTokens(p.tokens, s.tokens) && sameSkillRecords(p, s)) {
       if (prev.sessions[i] !== p) sessionsSame = false;
       return p;
     }
@@ -1510,16 +1744,20 @@ function mergeIndex(prev, next) {
     projectsSame = false;
     return n;
   });
-  if (sessionsSame && projectsSame && prev.indexing === next.indexing) return prev;
+  const prevSkills = prev.skills || [], nextSkills = next.skills || [];
+  const skillsSame = prevSkills.length === nextSkills.length &&
+    nextSkills.every((s, i) => prevSkills[i].id === s.id && prevSkills[i].source === s.source);
+  if (sessionsSame && projectsSame && skillsSame && prev.indexing === next.indexing) return prev;
   return {
     projects: projectsSame ? prev.projects : projects,
     sessions: sessionsSame ? prev.sessions : sessions,
+    skills: skillsSame ? prevSkills : nextSkills,
     indexing: next.indexing,
   };
 }
 
 function App() {
-  const [index, setIndex] = useState({ projects: [], sessions: [], indexing: true });
+  const [index, setIndex] = useState({ projects: [], sessions: [], skills: [], indexing: true });
   const [progress, setProgress] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
@@ -1529,6 +1767,10 @@ function App() {
   const [view, setView] = useState('archive'); // 'archive' | 'ledger'
   const [dateFilter, setDateFilter] = useState({ preset: 'all', from: null, to: null });
   const [modelFilter, setModelFilter] = useState(new Set());
+  // Click-through from the Skills table: { id, sessions:Set<sessionId>,
+  // uuids:Map<sessionId, eventUuid> }. Narrows the session list only; the
+  // Ledger and Archive stats keep their own scope.
+  const [skillFilter, setSkillFilter] = useState(null);
   const [themePref, setThemePref] = useState(() => localStorage.getItem('hindcast-theme') || 'auto');
   const [resolvedTheme, setResolvedTheme] = useState(() => document.documentElement.dataset.theme || 'dark');
 
@@ -1615,7 +1857,14 @@ function App() {
     return dateScoped.filter((s) => Object.keys(s.models).some((m) => modelFilter.has(m)));
   }, [dateScoped, modelFilter]);
 
-  const anyFilter = dateFilter.preset !== 'all' || modelFilter.size > 0;
+  // The skill click-through narrows the session list (and rail counts), not
+  // the Ledger itself, so the Skills table never collapses to one row.
+  const listSessions = useMemo(() => {
+    if (!skillFilter) return filteredSessions;
+    return filteredSessions.filter((s) => skillFilter.sessions.has(s.id));
+  }, [filteredSessions, skillFilter]);
+
+  const anyFilter = dateFilter.preset !== 'all' || modelFilter.size > 0 || skillFilter !== null;
 
   // Rail counts follow the active filters (across ALL projects, regardless of
   // the current scope), so the numbers next to each project answer "how many
@@ -1626,15 +1875,17 @@ function App() {
     for (const s of index.sessions) {
       if (!sessionPassesDate(s, dateFilter)) continue;
       if (modelFilter.size && !Object.keys(s.models).some((m) => modelFilter.has(m))) continue;
+      if (skillFilter && !skillFilter.sessions.has(s.id)) continue;
       total++;
       byProject.set(s.project, (byProject.get(s.project) || 0) + 1);
     }
     return { total, byProject };
-  }, [index.sessions, dateFilter, modelFilter, nowTick]);
+  }, [index.sessions, dateFilter, modelFilter, skillFilter, nowTick]);
 
   const clearFilters = () => {
     setDateFilter({ preset: 'all', from: null, to: null });
     setModelFilter(new Set());
+    setSkillFilter(null);
   };
 
   // Stable handlers so the memoized Rail and session cards skip re-renders.
@@ -1642,12 +1893,21 @@ function App() {
     setView(v || 'archive');
     if (p !== selectedProject) {
       setModelFilter(new Set()); // scope changed; a stale selection would be invisible and uncheckable
+      setSkillFilter(null);
     }
     setSelectedProject(p); setSelectedSession(null);
   }, [selectedProject]);
 
   const selectSession = useCallback((id) => {
-    setSelectedSession(id); setJumpToUuid(null); setView('archive');
+    setSelectedSession(id);
+    // Arriving through the skill click-through: land the tape on the
+    // invocation event (Reel routes this through pinTo, never scrollIntoView).
+    setJumpToUuid(skillFilter && skillFilter.uuids.has(id) ? skillFilter.uuids.get(id) : null);
+    setView('archive');
+  }, [skillFilter]);
+
+  const toggleSkill = useCallback((id, sessionIds, uuids) => {
+    setSkillFilter((prev) => (prev && prev.id === id ? null : { id, sessions: sessionIds, uuids }));
   }, []);
 
   const projectName = selectedProject
@@ -1679,7 +1939,7 @@ function App() {
       />
       <SessionList
         key={selectedProject || '(all)'} /* remount on scope change clears the title query (also resets list scroll and dropdown state, which the old App-owned clear did not) */
-        sessions={filteredSessions}
+        sessions={listSessions}
         selectedId={selectedSession}
         onSelect={selectSession}
         projectName={projectName}
@@ -1695,11 +1955,19 @@ function App() {
         }
       />
       <div className="stage">
-        <Boundary resetKey={[selectedSession || 'none', view, selectedProject || 'all', dateFilter.preset, modelFilter.size].join('|')}>
+        <Boundary resetKey={[selectedSession || 'none', view, selectedProject || 'all', dateFilter.preset, modelFilter.size, skillFilter ? skillFilter.id : ''].join('|')}>
           {selectedSession
             ? <SessionView sessionId={selectedSession} jumpToUuid={jumpToUuid} theme={resolvedTheme} />
             : view === 'ledger'
-              ? <Ledger sessions={filteredSessions} dayInRange={dayInRange} modelFilter={modelFilter} />
+              ? <Ledger
+                  sessions={filteredSessions}
+                  allSessions={index.sessions}
+                  dayInRange={dayInRange}
+                  modelFilter={modelFilter}
+                  skillInventory={index.skills}
+                  activeSkillId={skillFilter ? skillFilter.id : null}
+                  onToggleSkill={toggleSkill}
+                />
               : <Archive
                   sessions={filteredSessions}
                   indexing={index.indexing || !!progress}
