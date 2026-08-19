@@ -15,6 +15,15 @@ const { chromium } = require('playwright-core');
   const results = [];
   const assert = (c, msg) => results.push((c ? 'ok   ' : 'FAIL ') + msg);
 
+  // Surface screenshots of an occluded window serve stale composited tiles
+  // (observed as a half-dark half-light frame after a theme flip), so every
+  // shot composites in the renderer instead.
+  const cdp = await ctx.newCDPSession(page);
+  const shoot = async (path) => {
+    const shot = await cdp.send('Page.captureScreenshot', { fromSurface: false, format: 'png' });
+    require('fs').writeFileSync(path, Buffer.from(shot.data, 'base64'));
+  };
+
   // Open the Ledger and scroll the Skills section into view.
   await page.locator('.rail-item', { hasText: 'The Ledger' }).click();
   await page.waitForTimeout(600);
@@ -40,12 +49,12 @@ const { chromium } = require('playwright-core');
   await page.locator('.theme-seg button', { hasText: 'dark' }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await page.waitForTimeout(500);
-  await page.screenshot({ path: `${outDir}/skills-dark.png` });
+  await shoot(`${outDir}/skills-dark.png`);
 
   await page.locator('.theme-seg button', { hasText: 'light' }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
   await page.waitForTimeout(500);
-  await page.screenshot({ path: `${outDir}/skills-light.png` });
+  await shoot(`${outDir}/skills-light.png`);
   await page.locator('.theme-seg button', { hasText: 'dark' }).click();
   await page.waitForTimeout(400);
 
@@ -63,7 +72,7 @@ const { chromium } = require('playwright-core');
   assert(await page.locator('tr.skill-detail').count() === 1, `row expands in place (${skillName})`);
   const lineCount = await page.locator('.skill-session').count();
   assert(lineCount > 0, `expansion lists sessions (${lineCount})`);
-  await page.screenshot({ path: `${outDir}/skills-expanded.png` });
+  await shoot(`${outDir}/skills-expanded.png`);
 
   // Single-expand: opening another row closes the first.
   const rows = page.locator('tr.skill-row');
@@ -97,11 +106,13 @@ const { chromium } = require('playwright-core');
     return null;
   }, skillName);
   assert(!!landed, `tape jump lands on the invocation (${landed || 'missed'})`);
-  await page.screenshot({ path: `${outDir}/skills-jump.png` });
+  await shoot(`${outDir}/skills-jump.png`);
 
   // Scoped-empty state: a project with sessions but no skill usage renders
   // the quiet explainer paragraph instead of the table.
-  await page.locator('.rail-item', { hasText: 'All projects' }).click().catch(() => {});
+  // The Archive rail item is the scope reset; there is no All projects item.
+  await page.locator('.rail-fixed .rail-item', { hasText: 'The Archive' }).click();
+  await page.waitForTimeout(400);
   const emptyProject = await page.evaluate(async () => {
     const idx = await window.hindcast.getIndex();
     const used = new Set();
@@ -125,7 +136,7 @@ const { chromium } = require('playwright-core');
     const para = await section.locator('.ledger-method').count();
     const blankRows = await section.locator('.skills-table tbody tr').count();
     assert(para === 1 || blankRows > 0, `scoped view stays designed (para=${para} rows=${blankRows})`);
-    await page.screenshot({ path: `${outDir}/skills-empty-scope.png` });
+    await shoot(`${outDir}/skills-empty-scope.png`);
   } else {
     results.push('skip scoped-empty: every project has skill usage');
   }
