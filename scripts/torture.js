@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { parseSession, extractMeta, foldSubagentUsage, claimSessionSkills, BUILTIN_COMMANDS } = require('../lib/scanner');
+const { parseSession, extractMeta, foldSubagentUsage, claimSessionSkills, parseTypedCommand, BUILTIN_COMMANDS } = require('../lib/scanner');
 const { search } = require('../lib/search');
 const { exportSession } = require('../lib/export');
 const { costOf, priceFor } = require('../lib/pricing');
@@ -271,6 +271,47 @@ const SKILL_FORK = SKILL_PARENT + '\n' + j(
     const ev = r.events.find((e) => e.uuid === 'fu1');
     if (!ev || ev.kind !== 'user') throw new Error('typed command event missing from reel');
     if (ev.text !== '/humanizer') throw new Error('expected "/humanizer", got ' + JSON.stringify(ev.text));
+  });
+  await check('skills: two Skill blocks on one line both claim, once each', async () => {
+    // Current writers land one content block per line, but multi-block
+    // lines are legal, and both blocks share the line uuid.
+    const twoBlocks = j({ type: 'assistant', uuid: 'tb1', timestamp: new Date(2026, 0, 8).toISOString(), message: { role: 'assistant', id: 'msg_tb1', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [
+      { type: 'tool_use', id: 'tbt1', name: 'Skill', input: { skill: 'first-skill' } },
+      { type: 'tool_use', id: 'tbt2', name: 'Skill', input: { skill: 'second-skill' } },
+    ] } });
+    const m = await extractMeta(writeFixture('skillTwoBlocks', twoBlocks));
+    if ((m.skillRecords || []).length !== 2) throw new Error('both blocks should record');
+    const claimed = new Set();
+    claimSessionSkills(m, claimed);
+    if (m.skills.length !== 2) throw new Error('shared line uuid must not collapse distinct skills, got ' + m.skills.length);
+    const fork = await extractMeta(writeFixture('skillTwoBlocksFork', twoBlocks));
+    claimSessionSkills(fork, claimed);
+    if (fork.skills.length !== 0) throw new Error('a verbatim fork copy must claim nothing new');
+  });
+  await check('skills: hostile unclosed wrappers stay linear and never parse', async () => {
+    // A pasted line can carry one real tag pair (passing the gate) plus
+    // thousands of unclosed openers; the wrapper strip must not go
+    // quadratic on it, and the residue must keep it from counting.
+    const line = '<command-name>/x</command-name>' + '<command-args>'.repeat(40000);
+    const t0 = Date.now();
+    const r = parseTypedCommand(line);
+    if (Date.now() - t0 > 1000) throw new Error('wrapper strip went quadratic');
+    if (r !== null) throw new Error('unclosed openers leave residue; must not parse as a command');
+  });
+  await check('skills: wrapper residue semantics hold on mismatched tags', async () => {
+    const cases = [
+      ['<command-message>m</command-message><command-name>/foo</command-name>', 'foo'],
+      ['<command-name>/a</command-name>\n<command-args>  spaced  </command-args>', 'a'],
+      ['<command-name><command-message></command-name></command-message>', null], // orphan closer stays as residue
+      ['</command-name><command-name>', null],
+      ['text before <command-name>/x</command-name>', null],
+    ];
+    for (const [text, want] of cases) {
+      const got = parseTypedCommand(text);
+      if ((got ? got.name : null) !== want) {
+        throw new Error('mismatch on ' + JSON.stringify(text) + ': got ' + JSON.stringify(got));
+      }
+    }
   });
 
   // ---- export on adversarial events (XSS, fences, </details>, images) ----
