@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { parseSession, extractMeta, foldSubagentUsage } = require('../lib/scanner');
+const { parseSession, extractMeta, foldSubagentUsage, claimSkillRecords } = require('../lib/scanner');
 const { search } = require('../lib/search');
 const { exportSession } = require('../lib/export');
 const { costOf, priceFor } = require('../lib/pricing');
@@ -61,7 +61,44 @@ const FIXTURES = {
     { type: 'assistant', uuid: 'a2', timestamp: new Date(2026, 0, 1).toISOString(), message: { role: 'assistant', id: 'msg_same', model: 'claude-opus-4-8', usage: { input_tokens: 100, output_tokens: 50 }, content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }
   ),
   imageBlocks: j({ type: 'user', uuid: 'u1', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }, { type: 'text', text: 'see' }] } }),
+  // Skill extraction: hostile Skill tool_use shapes; only s6 is well-formed.
+  malformedSkillBlocks: j(
+    { type: 'assistant', uuid: 'sa1', timestamp: new Date(2026, 0, 1).toISOString(), message: { role: 'assistant', id: 'msg_sk1', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [
+      { type: 'tool_use', id: 's1', name: 'Skill', input: null },
+      { type: 'tool_use', id: 's2', name: 'Skill', input: {} },
+      { type: 'tool_use', id: 's3', name: 'Skill', input: { skill: 42 } },
+      { type: 'tool_use', id: 's4', name: 'Skill', input: { skill: '   ' } },
+      { type: 'tool_use', id: 's5', name: 'Skill' },
+      { type: 'tool_use', id: 's6', name: 'Skill', input: { skill: 'real-skill' } },
+    ] } },
+    { type: 'assistant', uuid: 'sa2', message: { role: 'assistant', id: 'msg_sk2', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [
+      { type: 'tool_use', id: 's7', name: 'Skill', input: { skill: 'no-timestamp-skipped' } },
+    ] } }
+  ),
+  // Skill extraction: lines that quote or wrap command names but must not count.
+  // Only u-real counts (one typed record).
+  skillFalsePositives: j(
+    { type: 'user', uuid: 'sc1', isCompactSummary: true, timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>/humanizer</command-name>\n<command-message>humanizer</command-message>' } },
+    { type: 'user', uuid: 'sc2', isMeta: true, timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>/humanizer</command-name>' } },
+    { type: 'user', uuid: 'sc3', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: 'the transcript shows <command-name>/humanizer</command-name> mid-text' } },
+    { type: 'user', uuid: 'sc4', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>fable</command-args>' } },
+    { type: 'user', uuid: 'sc5', isSidechain: true, timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>/humanizer</command-name>' } },
+    { type: 'assistant', uuid: 'sc6', isSidechain: true, timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'assistant', id: 'msg_sc6', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [{ type: 'tool_use', id: 'sct1', name: 'Skill', input: { skill: 'from-a-sidechain' } }] } },
+    { type: 'user', uuid: 'sc7', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>(.*?)</command-name>' } },
+    { type: 'user', uuid: 'u-real', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-name>/blog-review</command-name>\n<command-message>blog-review</command-message>\n<command-args>the draft</command-args>' } },
+    { type: 'user', uuid: 'u-real2', timestamp: new Date(2026, 0, 2).toISOString(), message: { role: 'user', content: '<command-message>job-apply</command-message>\n<command-name>/job-apply</command-name>' } }
+  ),
 };
+
+// A fork copies its parent's history verbatim (same uuids, same tool_use ids)
+// and then adds new work. Used by the global-claim check below.
+const SKILL_PARENT = j(
+  { type: 'user', uuid: 'fu1', timestamp: new Date(2026, 0, 1).toISOString(), message: { role: 'user', content: '<command-name>/humanizer</command-name>\n<command-args></command-args>' } },
+  { type: 'assistant', uuid: 'fa1', parentUuid: 'fu1', timestamp: new Date(2026, 0, 1, 1).toISOString(), message: { role: 'assistant', id: 'msg_f1', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [{ type: 'tool_use', id: 'toolu_fork1', name: 'Skill', input: { skill: 'oss-launch' } }] } }
+);
+const SKILL_FORK = SKILL_PARENT + '\n' + j(
+  { type: 'assistant', uuid: 'fb2', parentUuid: 'fa1', timestamp: new Date(2026, 0, 3).toISOString(), message: { role: 'assistant', id: 'msg_f2', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [{ type: 'tool_use', id: 'toolu_fork2', name: 'Skill', input: { skill: 'oss-launch' } }] } }
+);
 
 (async () => {
   // ---- parseSession + extractMeta on every fixture ----
@@ -86,6 +123,47 @@ const FIXTURES = {
     const { aggregateRecords } = require('../lib/scanner');
     const agg = aggregateRecords(m.usageRecords);
     if (agg.tokens.output !== 50) throw new Error('expected 50 output (deduped), got ' + agg.tokens.output);
+  });
+
+  // ---- skill extraction ----
+  await check('skills: malformed Skill blocks yield exactly one record', async () => {
+    const m = await extractMeta(writeFixture('skillsMalformed', FIXTURES.malformedSkillBlocks));
+    const recs = m.skillRecords || [];
+    if (recs.length !== 1) throw new Error('expected 1 record, got ' + recs.length);
+    if (recs[0].skill !== 'real-skill' || recs[0].by !== 'claude' || recs[0].u !== 'sa1') {
+      throw new Error('wrong record: ' + JSON.stringify(recs[0]));
+    }
+  });
+  await check('skills: compaction/meta/sidechain/builtin/mid-text never count', async () => {
+    const m = await extractMeta(writeFixture('skillsFalsePos', FIXTURES.skillFalsePositives));
+    const recs = m.skillRecords || [];
+    if (recs.length !== 2) throw new Error('expected 2 records, got ' + JSON.stringify(recs));
+    if (recs[0].skill !== 'blog-review' || recs[0].by !== 'typed' || recs[0].cid !== 'u-real') {
+      throw new Error('wrong record: ' + JSON.stringify(recs[0]));
+    }
+    // Older transcripts put <command-message> before <command-name>.
+    if (recs[1].skill !== 'job-apply' || recs[1].cid !== 'u-real2') {
+      throw new Error('message-first wrapper order missed: ' + JSON.stringify(recs[1]));
+    }
+  });
+  await check('skills: forked session copies count once (global claim)', async () => {
+    const parent = await extractMeta(writeFixture('skillFork1', SKILL_PARENT));
+    const fork = await extractMeta(writeFixture('skillFork2', SKILL_FORK));
+    if (parent.skillRecords.length !== 2) throw new Error('parent should see 2, got ' + parent.skillRecords.length);
+    if (fork.skillRecords.length !== 3) throw new Error('fork should see 3 pre-claim, got ' + fork.skillRecords.length);
+    claimSkillRecords([parent, fork]); // oldest first, as buildIndex sorts
+    const total = parent.skillRecords.length + fork.skillRecords.length;
+    if (total !== 3) throw new Error('expected 3 claimed total, got ' + total);
+    if (fork.skillRecords.length !== 1 || fork.skillRecords[0].u !== 'fb2') {
+      throw new Error('fork must keep only its new invocation: ' + JSON.stringify(fork.skillRecords));
+    }
+    if (fork.skillRecords[0].cid !== undefined) throw new Error('cid must be dropped from shipped records');
+  });
+  await check('skills: typed command stays a visible reel event (tape jump target)', async () => {
+    const r = await parseSession(writeFixture('skillTyped', SKILL_PARENT));
+    const ev = r.events.find((e) => e.uuid === 'fu1');
+    if (!ev || ev.kind !== 'user') throw new Error('typed command event missing from reel');
+    if (ev.text !== '/humanizer') throw new Error('expected "/humanizer", got ' + JSON.stringify(ev.text));
   });
 
   // ---- export on adversarial events (XSS, fences, </details>, images) ----
