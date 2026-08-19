@@ -603,6 +603,9 @@ body {
 
 /* ── skills (inside the ledger) ── */
 
+/* Only the name column may wrap (long plugin ids); a date broken across
+   two lines reads as clutter. */
+.skills-table td:not(.name), .skills-table th:not(.name) { white-space: nowrap; }
 .skills-table td.name { color: var(--ink-dim); max-width: 280px; }
 .skills-table .twist {
   display: inline-block; width: 10px;

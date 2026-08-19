@@ -96,7 +96,7 @@ function SpoolMark({ size = 20 }) {
   );
 }
 
-const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filtersActive, themePref, setThemePref, view }) {
+const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filtersActive, themePref, setThemePref, view, skillCount }) {
   // Local query: typing here re-renders only the rail, never the app.
   const [projectQuery, setProjectQuery] = useState('');
   const filterVisible = projects.length > 8;
@@ -130,6 +130,13 @@ const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessi
         >
           <span className="name">The Ledger</span>
           <span className="count">$</span>
+        </div>
+        <div
+          className={'rail-item' + (view === 'skills' ? ' active' : '')}
+          onClick={() => onSelect(selected, 'skills')}
+        >
+          <span className="name">The Skills</span>
+          <span className="count">{skillCount}</span>
         </div>
       </div>
       {/* Label and filter sit outside the scroll container, so a scrolled
@@ -644,13 +651,10 @@ const dayKeyOf = (ts) => {
   return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
 };
 
-function Ledger({ sessions, scopeSessions, allSessions, dayInRange, dateFilter, modelFilter, skillInventory, onOpenSession }) {
+function Ledger({ sessions, dayInRange, modelFilter }) {
   const [group, setGroup] = useState('day');
-  const [openSkill, setOpenSkill] = useState(null); // name of the one expanded row, or null
   const dayOk = dayInRange || (() => true);
   const modelOk = (m) => !modelFilter || modelFilter.size === 0 || modelFilter.has(m);
-  const skillScope = scopeSessions || sessions;
-  const skillAll = allSessions || skillScope;
 
   const { rows, models, totals } = useMemo(() => {
     // period -> model -> {in,out,cr,w5,w1}; plus per-period session counts
@@ -738,13 +742,106 @@ function Ledger({ sessions, scopeSessions, allSessions, dayInRange, dateFilter, 
 
   const maxRowCost = Math.max(...rows.map((r) => r.cost || 0), 0.01);
 
-  // Aggregates s.skills entirely in memory; the panel does zero file IO.
-  // Three session lists feed it. skillAll is the whole archive: the
-  // never-fired and idle flags and the skill-vs-builtin classification
-  // claim all-time truth, so any narrowing would make them lie. skillScope
-  // is project-scoped only: the columns honor the date filter per record
-  // (dayOk) and ignore the model filter, since a skill invocation carries
-  // no model. `sessions` (fully filtered) feeds only the usage tables.
+  return (
+    <div className="archive">
+      <div className="archive-hero">
+        <div className="archive-eyebrow">The Ledger</div>
+        <div className="archive-title">
+          <em>{fmtUSD(totals.cost)}</em> of API-equivalent value burned.
+        </div>
+        <div className="archive-sub">
+          Token usage and estimated cost at published API rates, computed from the transcripts
+          themselves and deduplicated by message. Estimates, not an invoice — subscription plans
+          don't bill per token.
+        </div>
+        <div className="stat-row">
+          <div className="stat"><div className="num">{fmtUSD(totals.cost)}</div><div className="lbl">est. total value</div></div>
+          <div className="stat"><div className="num">{fmtUSD(last7)}</div><div className="lbl">last 7 days</div></div>
+          <div className="stat"><div className="num">{fmtTokens(totals.out)}</div><div className="lbl">tokens written</div></div>
+          <div className="stat"><div className="num">{fmtTokens(totals.cr)}</div><div className="lbl">tokens read</div></div>
+          <div className="stat"><div className="num">{totals.days}</div><div className="lbl">active days</div></div>
+        </div>
+      </div>
+
+      <div className="archive-section">
+        <h3>By model</h3>
+        <BarList items={models.map((m) => ({
+          label: modelShort(m.model),
+          value: m.cost || 0,
+          display: `${fmtUSD(m.cost)} · ${fmtTokens(m.u.out)} out`,
+        }))} color="var(--brass-dim)" />
+      </div>
+
+      <div className="archive-section">
+        <h3>
+          Over time
+          <span className="ledger-groups">
+            {['day', 'week', 'month'].map((g) => (
+              <button key={g} className={group === g ? 'on' : ''} onClick={() => setGroup(g)}>{g}</button>
+            ))}
+          </span>
+        </h3>
+        <div className="ledger-table-wrap">
+          <table className="ledger-table">
+            <thead><tr>
+              <th className="l">{group}</th><th className="l">models</th>
+              <th>sessions</th><th>in</th><th>out</th><th>cache r</th><th>cache w</th><th>est. cost</th><th></th>
+            </tr></thead>
+            <tbody>
+              {rows.slice(0, 90).map((r) => (
+                <tr key={r.key}>
+                  <td className="l period">{r.label}</td>
+                  <td className="l models">
+                    {r.models.slice(0, 4).map((m) => (
+                      <span key={m.model} className="model-chip" title={`${m.model}: ${fmtUSD(m.cost)}`}>
+                        {modelShort(m.model)}
+                      </span>
+                    ))}
+                    {r.models.length > 4 && <span className="model-chip">+{r.models.length - 4}</span>}
+                  </td>
+                  <td>{r.sessions}</td>
+                  <td>{fmtTokens(r.tin)}</td>
+                  <td>{fmtTokens(r.tout)}</td>
+                  <td>{fmtTokens(r.tcr)}</td>
+                  <td>{fmtTokens(r.tcw)}</td>
+                  <td className="cost">{fmtUSD(r.cost)}</td>
+                  <td className="spark">
+                    <span className="spark-bar" style={{ width: `${Math.max(2, ((r.cost || 0) / maxRowCost) * 100)}%` }} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length > 90 && <div className="ledger-note">showing the most recent 90 periods</div>}
+      </div>
+
+      <div className="archive-section">
+        <h3>Method</h3>
+        <p className="ledger-method">
+          Cost = input + output at each model's published $/MTok, cache reads at 0.1×, cache
+          writes at 1.25× (5-minute) and 2× (1-hour) input rate. Usage is deduplicated by API
+          message id. Models without a known price are counted in tokens but excluded from cost.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------- the skills (inventory & firings) ----------
+
+function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInventory, onOpenSession }) {
+  const [openSkill, setOpenSkill] = useState(null); // name of the one expanded row, or null
+  const dayOk = dayInRange || (() => true);
+  const skillAll = allSessions || scopeSessions;
+
+  // Aggregates s.skills entirely in memory; the page does zero file IO.
+  // Two session lists feed it. skillAll is the whole archive: the hero, the
+  // never-fired and idle flags, and the skill-vs-builtin classification
+  // claim all-time truth, so any narrowing would make them lie.
+  // scopeSessions is project-scoped only: the columns honor the date filter
+  // per record (dayOk) and ignore the model filter, since a skill
+  // invocation carries no model.
   const skills = useMemo(() => {
     // Fixed 12-month window, oldest first. It ends at the custom range's
     // upper bound when one is set, so a range older than the window still
@@ -788,7 +885,7 @@ function Ledger({ sessions, scopeSessions, allSessions, dayInRange, dateFilter, 
         if (r.ts > e.allLastTs) e.allLastTs = r.ts;
       }
     }
-    for (const s of skillScope) {
+    for (const s of scopeSessions) {
       for (const r of (s.skills || [])) {
         if (!r || !r.n || !r.ts) continue;
         if (!dayOk(dayKeyOf(r.ts))) continue;
@@ -815,57 +912,70 @@ function Ledger({ sessions, scopeSessions, allSessions, dayInRange, dateFilter, 
     }
 
     // Typed builtins ride the same command wrappers as typed skills, so the
-    // scanner ships them undistinguished. A name stays in the table if the
-    // Skill tool ever fired it or it is installed; otherwise it is dropped
-    // as a builtin when the set or a local_command sighting says so. What
+    // scanner ships them undistinguished. A name stays if the Skill tool
+    // ever fired it or it is installed; otherwise it is dropped as a
+    // builtin when the set or a local_command sighting says so. What
     // remains (typed-only, not installed, not builtin) is typically a
-    // since-removed skill, which must keep showing. The archive-wide pass
-    // also names skills fired only outside the current scope or filter;
-    // those rows show only when installed (carrying their flags), so the
-    // table itself keeps following the view.
-    const rows = [...byName.values()]
-      .filter((e) => (e.count > 0 || e.installed) &&
-        (e.allClaude > 0 || e.installed ||
-          !(builtinSeen.has(e.name) || BUILTIN_COMMANDS.has(e.name))))
+    // since-removed skill, which must keep showing.
+    const classified = [...byName.values()].filter((e) =>
+      e.allClaude > 0 || e.installed ||
+        !(builtinSeen.has(e.name) || BUILTIN_COMMANDS.has(e.name)));
+
+    // Hero and stat-row numbers are archive-true like the flags: filters
+    // never change what is installed or what never fired.
+    const now = Date.now();
+    const stats = { installed: 0, firedEver: 0, neverFired: 0, idle: 0 };
+    for (const e of classified) {
+      if (e.installed) stats.installed++;
+      if (e.allCount > 0) stats.firedEver++;
+      if (e.installed && e.allCount === 0) stats.neverFired++;
+      if (e.allCount > 0 && now - e.allLastTs > 60 * 864e5) stats.idle++;
+    }
+
+    // The archive-wide pass also names skills fired only outside the
+    // current scope or filter; those rows show only when installed
+    // (carrying their flags), so the table keeps following the view.
+    const rows = classified
+      .filter((e) => e.count > 0 || e.installed)
       // Fired skills by in-filter count, then all-time count, then name;
       // installed-never-fired rows sink to the bottom alphabetically.
       .sort((a, b) =>
         (b.count - a.count) || (b.allCount - a.allCount) || (a.name < b.name ? -1 : 1));
-    return { rows, months };
-  }, [skillScope, skillAll, dayInRange, dateFilter, skillInventory]);
+    return { rows, months, stats };
+  }, [scopeSessions, skillAll, dayInRange, dateFilter, skillInventory]);
 
+  const st = skills.stats;
   return (
     <div className="archive">
       <div className="archive-hero">
-        <div className="archive-eyebrow">The Ledger</div>
+        <div className="archive-eyebrow">The Skills</div>
         <div className="archive-title">
-          <em>{fmtUSD(totals.cost)}</em> of API-equivalent value burned.
+          {st.installed > 0 && st.neverFired > 0 ? (
+            <>Of <em>{st.installed}</em> installed skills, <em>{st.neverFired}</em> {st.neverFired === 1 ? 'has' : 'have'} never fired.</>
+          ) : st.installed > 0 ? (
+            <>All <em>{st.installed}</em> installed skills have fired.</>
+          ) : st.firedEver > 0 ? (
+            <><em>{st.firedEver}</em> skills have fired across the archive.</>
+          ) : (
+            <>No skills have fired yet.</>
+          )}
         </div>
         <div className="archive-sub">
-          Token usage and estimated cost at published API rates, computed from the transcripts
-          themselves and deduplicated by message. Estimates, not an invoice — subscription plans
-          don't bill per token.
+          Every invocation read from the transcripts, whether Claude loaded the skill or
+          you typed the slash command, deduplicated across forked and resumed sessions.
+          Counts follow the project scope and the date filter; the model filter does not
+          apply, and the never-fired and idle flags always speak for the whole archive.
         </div>
         <div className="stat-row">
-          <div className="stat"><div className="num">{fmtUSD(totals.cost)}</div><div className="lbl">est. total value</div></div>
-          <div className="stat"><div className="num">{fmtUSD(last7)}</div><div className="lbl">last 7 days</div></div>
-          <div className="stat"><div className="num">{fmtTokens(totals.out)}</div><div className="lbl">tokens written</div></div>
-          <div className="stat"><div className="num">{fmtTokens(totals.cr)}</div><div className="lbl">tokens read</div></div>
-          <div className="stat"><div className="num">{totals.days}</div><div className="lbl">active days</div></div>
+          <div className="stat"><div className="num">{st.firedEver}</div><div className="lbl">skills fired</div></div>
+          <div className="stat"><div className="num">{st.installed}</div><div className="lbl">installed</div></div>
+          <div className="stat"><div className="num">{st.neverFired}</div><div className="lbl">never fired</div></div>
+          <div className="stat"><div className="num">{st.idle}</div><div className="lbl">idle 60+ days</div></div>
         </div>
       </div>
 
       <div className="archive-section">
-        <h3>By model</h3>
-        <BarList items={models.map((m) => ({
-          label: modelShort(m.model),
-          value: m.cost || 0,
-          display: `${fmtUSD(m.cost)} · ${fmtTokens(m.u.out)} out`,
-        }))} color="var(--brass-dim)" />
-      </div>
-
-      <div className="archive-section">
-        <h3>Skills</h3>
+        <h3>By skill</h3>
         {skills.rows.length === 0 ? (
           <p className="ledger-method">
             No skill invocations in this view. When a session fires a skill, whether
@@ -966,66 +1076,6 @@ function Ledger({ sessions, scopeSessions, allSessions, dayInRange, dateFilter, 
             </table>
           </div>
         )}
-      </div>
-
-      <div className="archive-section">
-        <h3>
-          Over time
-          <span className="ledger-groups">
-            {['day', 'week', 'month'].map((g) => (
-              <button key={g} className={group === g ? 'on' : ''} onClick={() => setGroup(g)}>{g}</button>
-            ))}
-          </span>
-        </h3>
-        <div className="ledger-table-wrap">
-          <table className="ledger-table">
-            <thead><tr>
-              <th className="l">{group}</th><th className="l">models</th>
-              <th>sessions</th><th>in</th><th>out</th><th>cache r</th><th>cache w</th><th>est. cost</th><th></th>
-            </tr></thead>
-            <tbody>
-              {rows.slice(0, 90).map((r) => (
-                <tr key={r.key}>
-                  <td className="l period">{r.label}</td>
-                  <td className="l models">
-                    {r.models.slice(0, 4).map((m) => (
-                      <span key={m.model} className="model-chip" title={`${m.model}: ${fmtUSD(m.cost)}`}>
-                        {modelShort(m.model)}
-                      </span>
-                    ))}
-                    {r.models.length > 4 && <span className="model-chip">+{r.models.length - 4}</span>}
-                  </td>
-                  <td>{r.sessions}</td>
-                  <td>{fmtTokens(r.tin)}</td>
-                  <td>{fmtTokens(r.tout)}</td>
-                  <td>{fmtTokens(r.tcr)}</td>
-                  <td>{fmtTokens(r.tcw)}</td>
-                  <td className="cost">{fmtUSD(r.cost)}</td>
-                  <td className="spark">
-                    <span className="spark-bar" style={{ width: `${Math.max(2, ((r.cost || 0) / maxRowCost) * 100)}%` }} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {rows.length > 90 && <div className="ledger-note">showing the most recent 90 periods</div>}
-      </div>
-
-      <div className="archive-section">
-        <h3>Method</h3>
-        <p className="ledger-method">
-          Cost = input + output at each model's published $/MTok, cache reads at 0.1×, cache
-          writes at 1.25× (5-minute) and 2× (1-hour) input rate. Usage is deduplicated by API
-          message id. Models without a known price are counted in tokens but excluded from cost.
-        </p>
-        <p className="ledger-method">
-          Skill counts are read from the same transcripts and deduplicated across
-          forked and resumed sessions. The columns honor the project scope and the
-          date filter; the model filter does not apply to them, since a skill
-          invocation has no model. The never-fired and idle flags always speak for
-          the whole archive, whatever the filters say.
-        </p>
       </div>
     </div>
   );
@@ -1782,7 +1832,7 @@ function App() {
   const [jumpToUuid, setJumpToUuid] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchSeed, setSearchSeed] = useState('');
-  const [view, setView] = useState('archive'); // 'archive' | 'ledger'
+  const [view, setView] = useState('archive'); // 'archive' | 'ledger' | 'skills'
   const [dateFilter, setDateFilter] = useState({ preset: 'all', from: null, to: null });
   const [modelFilter, setModelFilter] = useState(new Set());
   const [themePref, setThemePref] = useState(() => localStorage.getItem('hindcast-theme') || 'auto');
@@ -1932,6 +1982,7 @@ function App() {
         filtersActive={anyFilter}
         themePref={themePref}
         setThemePref={setThemePref}
+        skillCount={(index.skillInventory || []).length}
       />
       <SessionList
         key={selectedProject || '(all)'} /* remount on scope change clears the title query (also resets list scroll and dropdown state, which the old App-owned clear did not) */
@@ -1954,17 +2005,17 @@ function App() {
         <Boundary resetKey={[selectedSession || 'none', view, selectedProject || 'all', dateFilter.preset, modelFilter.size].join('|')}>
           {selectedSession
             ? <SessionView sessionId={selectedSession} jumpToUuid={jumpToUuid} theme={resolvedTheme} />
-            : view === 'ledger'
-              ? <Ledger
-                  sessions={filteredSessions}
+            : view === 'skills'
+              ? <Skills
                   scopeSessions={visibleSessions}
                   allSessions={index.sessions}
                   dayInRange={dayInRange}
                   dateFilter={dateFilter}
-                  modelFilter={modelFilter}
                   skillInventory={index.skillInventory || []}
                   onOpenSession={openFromSearch}
                 />
+            : view === 'ledger'
+              ? <Ledger sessions={filteredSessions} dayInRange={dayInRange} modelFilter={modelFilter} />
               : <Archive
                   sessions={filteredSessions}
                   indexing={index.indexing || !!progress}
