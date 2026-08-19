@@ -640,11 +640,13 @@ const dayKeyOf = (ts) => {
   return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
 };
 
-function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSession }) {
+function Ledger({ sessions, scopeSessions, allSessions, dayInRange, dateFilter, modelFilter, skillInventory, onOpenSession }) {
   const [group, setGroup] = useState('day');
   const [openSkill, setOpenSkill] = useState(null); // name of the one expanded row, or null
   const dayOk = dayInRange || (() => true);
   const modelOk = (m) => !modelFilter || modelFilter.size === 0 || modelFilter.has(m);
+  const skillScope = scopeSessions || sessions;
+  const skillAll = allSessions || skillScope;
 
   const { rows, models, totals } = useMemo(() => {
     // period -> model -> {in,out,cr,w5,w1}; plus per-period session counts
@@ -733,15 +735,22 @@ function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSessi
   const maxRowCost = Math.max(...rows.map((r) => r.cost || 0), 0.01);
 
   // Aggregates s.skills entirely in memory; the panel does zero file IO.
-  // Sessions arrive already narrowed by project scope, date, and model, so
-  // per-record filtering below only re-applies the date filter (dayOk); the
-  // model filter cannot apply because a skill record carries no model.
+  // Three session lists feed it. skillAll is the whole archive: the
+  // never-fired and idle flags and the skill-vs-builtin classification
+  // claim all-time truth, so any narrowing would make them lie. skillScope
+  // is project-scoped only: the columns honor the date filter per record
+  // (dayOk) and ignore the model filter, since a skill invocation carries
+  // no model. `sessions` (fully filtered) feeds only the usage tables.
   const skills = useMemo(() => {
-    // Fixed 12-month window, oldest first, ending in the current month.
+    // Fixed 12-month window, oldest first. It ends at the custom range's
+    // upper bound when one is set, so a range older than the window still
+    // draws bars; a range spanning more than 12 months keeps its oldest
+    // records in the counts but off the strip.
     const months = [];
-    const now = new Date();
+    const end = dateFilter && dateFilter.preset === 'custom' && dateFilter.to
+      ? new Date(dateFilter.to + 'T12:00:00') : new Date();
     for (let i = 11; i >= 0; i--) {
-      const m = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const m = new Date(end.getFullYear(), end.getMonth() - i, 1);
       months.push(m.getFullYear() + '-' + pad2(m.getMonth() + 1));
     }
 
@@ -750,9 +759,9 @@ function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSessi
       let e = byName.get(name);
       if (!e) {
         e = {
-          name, installed: false,
-          allCount: 0, allClaude: 0, allLastTs: 0, // ignore the date filter; feed the flags and classification
-          count: 0, claude: 0, you: 0,             // honor the date filter; feed the columns
+          name, installed: false, source: null,
+          allCount: 0, allClaude: 0, allLastTs: 0, // archive-wide; feed the flags and classification
+          count: 0, claude: 0, you: 0,             // scope + date filter; feed the columns
           firstTs: null, lastTs: null,
           byMonth: new Map(),                      // 'YYYY-MM' -> count, date-filtered
           sessions: new Map(),                     // sessionId -> { s, count, ts, uuid }
@@ -765,7 +774,7 @@ function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSessi
     // Names that ever arrived as a system local_command line; with the
     // hardcoded set, the builtin side of classification.
     const builtinSeen = new Set();
-    for (const s of sessions) {
+    for (const s of skillAll) {
       for (const n of Object.keys(s.builtins || {})) builtinSeen.add(n);
       for (const r of (s.skills || [])) {
         if (!r || !r.n || !r.ts) continue;
@@ -773,7 +782,13 @@ function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSessi
         e.allCount++;
         if (r.t === 'claude') e.allClaude++;
         if (r.ts > e.allLastTs) e.allLastTs = r.ts;
+      }
+    }
+    for (const s of skillScope) {
+      for (const r of (s.skills || [])) {
+        if (!r || !r.n || !r.ts) continue;
         if (!dayOk(dayKeyOf(r.ts))) continue;
+        const e = entry(r.n);
         e.count++;
         if (r.t === 'claude') e.claude++; else e.you++;
         if (!e.firstTs || r.ts < e.firstTs) e.firstTs = r.ts;
@@ -788,7 +803,11 @@ function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSessi
       }
     }
     for (const it of (skillInventory || [])) {
-      if (it && it.name) entry(it.name).installed = true;
+      if (it && it.name) {
+        const e = entry(it.name);
+        e.installed = true;
+        e.source = it.source || null;
+      }
     }
 
     // Typed builtins ride the same command wrappers as typed skills, so the
@@ -796,16 +815,20 @@ function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSessi
     // Skill tool ever fired it or it is installed; otherwise it is dropped
     // as a builtin when the set or a local_command sighting says so. What
     // remains (typed-only, not installed, not builtin) is typically a
-    // since-removed skill, which must keep showing.
+    // since-removed skill, which must keep showing. The archive-wide pass
+    // also names skills fired only outside the current scope or filter;
+    // those rows show only when installed (carrying their flags), so the
+    // table itself keeps following the view.
     const rows = [...byName.values()]
-      .filter((e) => e.allClaude > 0 || e.installed ||
-        !(builtinSeen.has(e.name) || BUILTIN_COMMANDS.has(e.name)))
+      .filter((e) => (e.count > 0 || e.installed) &&
+        (e.allClaude > 0 || e.installed ||
+          !(builtinSeen.has(e.name) || BUILTIN_COMMANDS.has(e.name))))
       // Fired skills by in-filter count, then all-time count, then name;
       // installed-never-fired rows sink to the bottom alphabetically.
       .sort((a, b) =>
         (b.count - a.count) || (b.allCount - a.allCount) || (a.name < b.name ? -1 : 1));
     return { rows, months };
-  }, [sessions, dayInRange, skillInventory]);
+  }, [skillScope, skillAll, dayInRange, dateFilter, skillInventory]);
 
   return (
     <div className="archive">
@@ -912,7 +935,9 @@ function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSessi
                           <span className="twist">{expandable ? (open ? '▼' : '▶') : ''}</span>
                           {r.name}
                           {r.installed && r.allCount === 0 && (
-                            <span className="model-chip skill-flag" title="installed under ~/.claude/skills but never fired in any indexed session">never fired</span>
+                            <span className="model-chip skill-flag" title={(r.source === 'plugin'
+                              ? 'provided by an installed plugin'
+                              : 'installed under ~/.claude/skills') + ' but never fired in any indexed session'}>never fired</span>
                           )}
                           {r.allCount > 0 && Date.now() - r.allLastTs > 60 * 864e5 && (
                             <span className="model-chip skill-flag" title={'last fired ' + fmtDate(r.allLastTs)}>
@@ -992,8 +1017,10 @@ function Ledger({ sessions, dayInRange, modelFilter, skillInventory, onOpenSessi
         </p>
         <p className="ledger-method">
           Skill counts are read from the same transcripts and deduplicated across
-          forked and resumed sessions. They honor the date filter; the model filter
-          does not apply to them, since a skill invocation has no model.
+          forked and resumed sessions. The columns honor the project scope and the
+          date filter; the model filter does not apply to them, since a skill
+          invocation has no model. The never-fired and idle flags always speak for
+          the whole archive, whatever the filters say.
         </p>
       </div>
     </div>
@@ -1926,7 +1953,10 @@ function App() {
             : view === 'ledger'
               ? <Ledger
                   sessions={filteredSessions}
+                  scopeSessions={visibleSessions}
+                  allSessions={index.sessions}
                   dayInRange={dayInRange}
+                  dateFilter={dateFilter}
                   modelFilter={modelFilter}
                   skillInventory={index.skillInventory || []}
                   onOpenSession={openFromSearch}
