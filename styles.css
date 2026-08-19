@@ -139,6 +139,7 @@ body {
 .rail-brand .brand-mark svg { display: block; }
 
 .rail-fixed { padding: 0 10px; }
+.rail-list-head { padding: 0 10px; }
 .rail-list { overflow-y: auto; flex: 1; min-height: 0; padding: 0 10px 16px; }
 
 .rail-filter {
@@ -164,13 +165,16 @@ body {
   color: var(--putty-dim);
 }
 
+/* A rank above the old 9.5px putty-dim: the rail should scan as three
+   levels (The Archive, The Ledger, Projects), but the label must not
+   reach rail-item size or it reads as a clickable row. */
 .rail-section {
   font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
+  font-size: 11px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--putty-dim);
-  padding: 14px 10px 6px;
+  color: var(--ink);
+  padding: 16px 10px 7px;
 }
 
 .rail-item {

@@ -132,7 +132,9 @@ const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessi
           <span className="count">$</span>
         </div>
       </div>
-      <div className="rail-list">
+      {/* Label and filter sit outside the scroll container, so a scrolled
+          project list stays named and filterable. */}
+      <div className="rail-list-head">
         <div className="rail-section">Projects</div>
         {filterVisible && (
           <input
@@ -142,6 +144,8 @@ const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessi
             onChange={(e) => setProjectQuery(e.target.value)}
           />
         )}
+      </div>
+      <div className="rail-list">
         {projectQuery.trim() !== '' && shownProjects.length === 0 && (
           <div className="rail-empty">no matching projects</div>
         )}
@@ -861,50 +865,6 @@ function Ledger({ sessions, scopeSessions, allSessions, dayInRange, dateFilter, 
       </div>
 
       <div className="archive-section">
-        <h3>
-          Over time
-          <span className="ledger-groups">
-            {['day', 'week', 'month'].map((g) => (
-              <button key={g} className={group === g ? 'on' : ''} onClick={() => setGroup(g)}>{g}</button>
-            ))}
-          </span>
-        </h3>
-        <div className="ledger-table-wrap">
-          <table className="ledger-table">
-            <thead><tr>
-              <th className="l">{group}</th><th className="l">models</th>
-              <th>sessions</th><th>in</th><th>out</th><th>cache r</th><th>cache w</th><th>est. cost</th><th></th>
-            </tr></thead>
-            <tbody>
-              {rows.slice(0, 90).map((r) => (
-                <tr key={r.key}>
-                  <td className="l period">{r.label}</td>
-                  <td className="l models">
-                    {r.models.slice(0, 4).map((m) => (
-                      <span key={m.model} className="model-chip" title={`${m.model}: ${fmtUSD(m.cost)}`}>
-                        {modelShort(m.model)}
-                      </span>
-                    ))}
-                    {r.models.length > 4 && <span className="model-chip">+{r.models.length - 4}</span>}
-                  </td>
-                  <td>{r.sessions}</td>
-                  <td>{fmtTokens(r.tin)}</td>
-                  <td>{fmtTokens(r.tout)}</td>
-                  <td>{fmtTokens(r.tcr)}</td>
-                  <td>{fmtTokens(r.tcw)}</td>
-                  <td className="cost">{fmtUSD(r.cost)}</td>
-                  <td className="spark">
-                    <span className="spark-bar" style={{ width: `${Math.max(2, ((r.cost || 0) / maxRowCost) * 100)}%` }} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {rows.length > 90 && <div className="ledger-note">showing the most recent 90 periods</div>}
-      </div>
-
-      <div className="archive-section">
         <h3>Skills</h3>
         {skills.rows.length === 0 ? (
           <p className="ledger-method">
@@ -1006,6 +966,50 @@ function Ledger({ sessions, scopeSessions, allSessions, dayInRange, dateFilter, 
             </table>
           </div>
         )}
+      </div>
+
+      <div className="archive-section">
+        <h3>
+          Over time
+          <span className="ledger-groups">
+            {['day', 'week', 'month'].map((g) => (
+              <button key={g} className={group === g ? 'on' : ''} onClick={() => setGroup(g)}>{g}</button>
+            ))}
+          </span>
+        </h3>
+        <div className="ledger-table-wrap">
+          <table className="ledger-table">
+            <thead><tr>
+              <th className="l">{group}</th><th className="l">models</th>
+              <th>sessions</th><th>in</th><th>out</th><th>cache r</th><th>cache w</th><th>est. cost</th><th></th>
+            </tr></thead>
+            <tbody>
+              {rows.slice(0, 90).map((r) => (
+                <tr key={r.key}>
+                  <td className="l period">{r.label}</td>
+                  <td className="l models">
+                    {r.models.slice(0, 4).map((m) => (
+                      <span key={m.model} className="model-chip" title={`${m.model}: ${fmtUSD(m.cost)}`}>
+                        {modelShort(m.model)}
+                      </span>
+                    ))}
+                    {r.models.length > 4 && <span className="model-chip">+{r.models.length - 4}</span>}
+                  </td>
+                  <td>{r.sessions}</td>
+                  <td>{fmtTokens(r.tin)}</td>
+                  <td>{fmtTokens(r.tout)}</td>
+                  <td>{fmtTokens(r.tcr)}</td>
+                  <td>{fmtTokens(r.tcw)}</td>
+                  <td className="cost">{fmtUSD(r.cost)}</td>
+                  <td className="spark">
+                    <span className="spark-bar" style={{ width: `${Math.max(2, ((r.cost || 0) / maxRowCost) * 100)}%` }} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length > 90 && <div className="ledger-note">showing the most recent 90 periods</div>}
       </div>
 
       <div className="archive-section">
