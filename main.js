@@ -59,17 +59,21 @@ async function refreshIndex() {
     // doesn't reload and re-render the whole app for nothing. The signature
     // is (path, mtime, size) of every main transcript; with the dedup
     // tiebreak in scanner.js the shipped index is a pure function of that
-    // set, EXCEPT for subagent files, which fold into cached meta without
-    // appearing in the signature. That is why any rescan that actually
-    // re-parsed files (lastParsed > 0) always pings: after a cache loss the
-    // re-parse can pick up changed subagent usage under an unchanged
-    // signature. Kept over JSON.stringify(index), which re-stringified the
-    // whole shipped index every rescan and held the result in memory for
-    // the life of the app.
+    // set, with two exceptions that need their own handling. Subagent files
+    // fold into cached meta without appearing in the signature; that is why
+    // any rescan that actually re-parsed files (lastParsed > 0) always
+    // pings: after a cache loss the re-parse can pick up changed subagent
+    // usage under an unchanged signature. And the skill inventory is
+    // re-read from ~/.claude/skills and the plugin manifest on every build,
+    // so it gets its own signature term, or a skill installed while the app
+    // is open would never reach the renderer on a quiet rescan. Kept over
+    // JSON.stringify(index), which re-stringified the whole shipped index
+    // every rescan and held the result in memory for the life of the app.
     const sig = index.sessions
       .map((s) => s.filePath + ':' + s.mtime + ':' + s.size)
       .sort()
-      .join('|');
+      .join('|')
+      + '#' + (index.skillInventory || []).map((i) => i.source + ':' + i.name).join('|');
     const changed = sig !== lastIndexSig;
     lastIndexSig = sig;
     // sentProgress keeps a visible progress bar from sticking; lastParsed
