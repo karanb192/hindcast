@@ -65,7 +65,12 @@ const { chromium } = require('playwright-core');
     'page opens under The Skills eyebrow');
   const thesis = (await page.locator('.archive-title').innerText()).trim();
   assert(/skills/i.test(thesis) && /\d/.test(thesis), `hero states the thesis (${thesis})`);
-  assert(await page.locator('.stat-row .stat').count() === 4, 'stat row carries 4 stats');
+  assert(await page.locator('.stat-row .stat').count() === 5, 'stat row carries 5 stats');
+  // The row must survive a reader's subtraction: installed = have fired +
+  // never fired (the miscount that shipped first mixed removed skills into
+  // the fired stat).
+  const nums = await page.$$eval('.stat-row .stat .num', (els) => els.map((e) => Number(e.textContent)));
+  assert(nums[0] === nums[1] + nums[2], `stat algebra closes (${nums[0]} = ${nums[1]} + ${nums[2]})`);
   const sub = await page.locator('.archive-sub').innerText();
   assert(sub.includes('model filter'), 'page sub explains the model-filter exemption');
   const bySkill = page.locator('.archive-section', { has: page.locator('h3', { hasText: 'By skill' }) });

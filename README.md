@@ -91,7 +91,7 @@ as not planned, so people prune by gut feeling or not at all. When I finally
 counted, 5 of my 17 installed skills had never fired once.
 
 The Skills page reads the answer out of the transcripts and opens with it:
-"Of 43 installed skills, 12 have never fired." Below that, every skill with
+"Of 43 installed skills, 28 have never fired." Below that, every skill with
 how often it fired, split by whether Claude loaded it or you typed the slash
 command, distinct sessions, first and last fired, and a 12-month trend.
 Installed skills that never fired get called out, so do ones idle for 60+

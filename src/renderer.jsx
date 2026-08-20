@@ -922,14 +922,23 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
         !(builtinSeen.has(e.name) || BUILTIN_COMMANDS.has(e.name)));
 
     // Hero and stat-row numbers are archive-true like the flags: filters
-    // never change what is installed or what never fired.
+    // never change what is installed or what never fired. The row's algebra
+    // must close under a reader's subtraction: installed = have fired +
+    // never fired. Skills that fired but sit outside today's inventory
+    // (removed skills, bare plugin names) get their own stat and never mix
+    // into the installed ones; idle is an installed-only flag, since an
+    // uninstalled skill needs no pruning nudge.
     const now = Date.now();
-    const stats = { installed: 0, firedEver: 0, neverFired: 0, idle: 0 };
+    const stats = { installed: 0, fired: 0, neverFired: 0, idle: 0, gone: 0 };
     for (const e of classified) {
-      if (e.installed) stats.installed++;
-      if (e.allCount > 0) stats.firedEver++;
-      if (e.installed && e.allCount === 0) stats.neverFired++;
-      if (e.allCount > 0 && now - e.allLastTs > 60 * 864e5) stats.idle++;
+      if (e.installed) {
+        stats.installed++;
+        if (e.allCount > 0) stats.fired++;
+        else stats.neverFired++;
+        if (e.allCount > 0 && now - e.allLastTs > 60 * 864e5) stats.idle++;
+      } else if (e.allCount > 0) {
+        stats.gone++;
+      }
     }
 
     // The archive-wide pass also names skills fired only outside the
@@ -954,8 +963,8 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
             <>Of <em>{st.installed}</em> installed skills, <em>{st.neverFired}</em> {st.neverFired === 1 ? 'has' : 'have'} never fired.</>
           ) : st.installed > 0 ? (
             <>All <em>{st.installed}</em> installed skills have fired.</>
-          ) : st.firedEver > 0 ? (
-            <><em>{st.firedEver}</em> skills have fired across the archive.</>
+          ) : st.gone > 0 ? (
+            <><em>{st.gone}</em> skills have fired across the archive.</>
           ) : (
             <>No skills have fired yet.</>
           )}
@@ -967,10 +976,11 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
           apply, and the never-fired and idle flags always speak for the whole archive.
         </div>
         <div className="stat-row">
-          <div className="stat"><div className="num">{st.firedEver}</div><div className="lbl">skills fired</div></div>
           <div className="stat"><div className="num">{st.installed}</div><div className="lbl">installed</div></div>
+          <div className="stat"><div className="num">{st.fired}</div><div className="lbl">have fired</div></div>
           <div className="stat"><div className="num">{st.neverFired}</div><div className="lbl">never fired</div></div>
           <div className="stat"><div className="num">{st.idle}</div><div className="lbl">idle 60+ days</div></div>
+          <div className="stat"><div className="num">{st.gone}</div><div className="lbl">fired, not installed</div></div>
         </div>
       </div>
 
@@ -1009,10 +1019,13 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
                               ? 'provided by an installed plugin'
                               : 'installed under ~/.claude/skills') + ' but never fired in any indexed session'}>never fired</span>
                           )}
-                          {r.allCount > 0 && Date.now() - r.allLastTs > 60 * 864e5 && (
+                          {r.installed && r.allCount > 0 && Date.now() - r.allLastTs > 60 * 864e5 && (
                             <span className="model-chip skill-flag" title={'last fired ' + fmtDate(r.allLastTs)}>
                               idle {Math.floor((Date.now() - r.allLastTs) / 864e5)}d
                             </span>
+                          )}
+                          {!r.installed && r.allCount > 0 && (
+                            <span className="model-chip skill-flag" title="fired in the archive but absent from the current inventory">not installed</span>
                           )}
                         </td>
                         <td>{num(r.count)}</td>
