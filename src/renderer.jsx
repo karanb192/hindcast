@@ -58,7 +58,7 @@ const modelShort = (m) => {
   return m.replace(/^claude-/, '').replace(/-\d{8}$/, '');
 };
 
-// Canvas can't use var() — resolve the theme's event colors at draw time.
+// Canvas can't use var(): resolve the theme's event colors at draw time.
 function themeEventColors() {
   const css = getComputedStyle(document.documentElement);
   const get = (n) => css.getPropertyValue(n).trim();
@@ -210,7 +210,7 @@ function sessionPassesDate(s, f) {
   return true;
 }
 
-// Predicate over a 'YYYY-MM-DD' day key — mirrors the session date filter at day
+// Predicate over a 'YYYY-MM-DD' day key: mirrors the session date filter at day
 // granularity, so the Ledger's per-day math matches the active Date filter.
 function makeDayInRange(f) {
   if (f.preset === 'all') return () => true;
@@ -515,7 +515,7 @@ function Heatmap({ sessions }) {
               key={j}
               className="heat-cell"
               style={c ? (shade(c.v) ? { background: shade(c.v) } : undefined) : { opacity: 0.25 }}
-              title={c ? `${c.day.toDateString()} — ${c.v} session${c.v === 1 ? '' : 's'}` : ''}
+              title={c ? `${c.day.toDateString()} · ${c.v} session${c.v === 1 ? '' : 's'}` : ''}
             />
           ))}
         </div>
@@ -598,7 +598,7 @@ function Archive({ sessions, indexing, progress, filtered }) {
       </div>
 
       <div className="archive-section">
-        <h3>{filtered ? 'Cadence — filtered view' : 'Cadence — last 26 weeks'}</h3>
+        <h3>{filtered ? 'Cadence: filtered view' : 'Cadence: last 26 weeks'}</h3>
         <Heatmap sessions={sessions} />
       </div>
 
@@ -751,7 +751,7 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
         </div>
         <div className="archive-sub">
           Token usage and estimated cost at published API rates, computed from the transcripts
-          themselves and deduplicated by message. Estimates, not an invoice — subscription plans
+          themselves and deduplicated by message. Estimates, not an invoice: subscription plans
           don't bill per token.
         </div>
         <div className="stat-row">
@@ -1213,7 +1213,7 @@ function Tape({ events, onSeek, scrollFraction, theme }) {
         <canvas ref={canvasRef} />
         {tip && (
           <div className="tape-tip" style={{ left: tip.x }}>
-            <span className="k">{tip.kind}</span> {tip.time} — {tip.label}
+            <span className="k">{tip.kind}</span> {tip.time} · {tip.label}
           </div>
         )}
       </div>
@@ -1347,8 +1347,8 @@ function Reel({ events, theme, jumpToUuid, onJumped }) {
         el.scrollIntoView({ block: 'center' });
       } else {
         // Place the event at the sliding reference line (viewport top at
-        // scroll start, viewport bottom at scroll end) — the same line the
-        // playhead reads — so the playhead lands exactly where you clicked.
+        // scroll start, viewport bottom at scroll end): the same line the
+        // playhead reads: so the playhead lands exactly where you clicked.
         const max = box.scrollHeight - box.clientHeight;
         const elTop = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
         box.scrollTop = max <= 0 ? 0 : Math.min(max, Math.max(0, elTop / (1 + box.clientHeight / max)));
@@ -1382,7 +1382,7 @@ function Reel({ events, theme, jumpToUuid, onJumped }) {
   }, [events, jumpToUuid]);
 
   // The playhead lives in the same space as the tape's ticks (event index),
-  // not raw scroll pixels — event heights vary too much for pixels to line up.
+  // not raw scroll pixels: event heights vary too much for pixels to line up.
   // Read which event crosses the reference line and interpolate within it.
   const onScroll = useCallback(() => {
     const box = scrollRef.current;
@@ -1720,7 +1720,7 @@ function SearchOverlay({ sessions, onClose, onOpenSession, initialQuery }) {
         <div className="palette-results">
           {!results && !busy && (
             <div className="palette-hint">
-              Full-text search across {sessions.length.toLocaleString()} transcripts — prompts, replies, thinking, commands, results.
+              Full-text search across {sessions.length.toLocaleString()} transcripts: prompts, replies, thinking, commands, results.
             </div>
           )}
           {busy && <div className="palette-hint">searching the archive…</div>}
@@ -1882,7 +1882,7 @@ function App() {
     if (api.saveTheme) api.saveTheme({ pref: themePref, resolved: resolvedTheme });
   }, [themePref, resolvedTheme]);
 
-  // Relative presets compare against "now" — nudge the memo forward each minute
+  // Relative presets compare against "now": nudge the memo forward each minute
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
     if (!(dateFilter.preset in PRESET_MS)) return;

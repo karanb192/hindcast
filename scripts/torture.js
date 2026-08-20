@@ -331,7 +331,7 @@ const SKILL_FORK = SKILL_PARENT + '\n' + j(
   await check('export(html) adversarial: no LIVE script/tag/handler/js-href', async () => {
     const h = exportSession(advMeta, advEvents, 'html').content;
     const body = h.replace(/<style>[\s\S]*?<\/style>/, ''); // ignore our own stylesheet
-    // Live-danger checks only — inert escaped text like &lt;img onerror=…&gt; is safe.
+    // Live-danger checks only: inert escaped text like &lt;img onerror=…&gt; is safe.
     if (/<script|<iframe|<object|<embed|<svg/i.test(body)) throw new Error('live dangerous tag leaked');
     if (/<[a-z][^>]*\son[a-z]+\s*=/i.test(body)) throw new Error('live event handler on a tag');
     if (/href=["']?\s*javascript:/i.test(body)) throw new Error('live javascript: href');
