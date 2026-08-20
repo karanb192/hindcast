@@ -601,7 +601,7 @@ body {
   font-size: 12.5px; color: var(--putty); max-width: 70ch; margin: 0;
 }
 
-/* ── skills (inside the ledger) ── */
+/* ── the skills page ── */
 
 /* Only the name column may wrap (long plugin ids); a date broken across
    two lines reads as clutter. */

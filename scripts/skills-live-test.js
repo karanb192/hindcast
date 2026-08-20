@@ -65,7 +65,7 @@ const { chromium } = require('playwright-core');
     'page opens under The Skills eyebrow');
   const thesis = (await page.locator('.archive-title').innerText()).trim();
   assert(/skills/i.test(thesis) && /\d/.test(thesis), `hero states the thesis (${thesis})`);
-  assert(await page.locator('.stat-row .stat').count() === 5, 'stat row carries 5 stats');
+  assert(await page.locator('.stat-row .stat').count() === 6, 'stat row carries 6 stats');
   // The row must survive a reader's subtraction: installed = have fired +
   // never fired (the miscount that shipped first mixed removed skills into
   // the fired stat).
@@ -79,6 +79,8 @@ const { chromium } = require('playwright-core');
   const rowCount = await page.locator('.skills-table tbody tr').count();
   assert(rowCount > 0, `skills table has rows (${rowCount})`);
   assert(await page.locator('.skill-flag').count() >= 1, 'a never-fired or idle chip renders');
+  assert(await page.locator('.skill-flag', { hasText: 'bundled' }).count() >= 1,
+    'bundled CLI skills wear the bundled chip, not "not installed"');
   assert(await page.locator('.skill-trend').first().locator('i').count() === 12,
     'trend has 12 fixed month slots');
 
@@ -145,6 +147,15 @@ const { chromium } = require('playwright-core');
   }, skillName);
   assert(!!landed, `tape jump lands on the invocation (${landed || 'missed'})`);
   await shoot(`${outDir}/skills-jump.png`);
+
+  // Return path: a session opened from a skill row keeps the rail on The
+  // Skills, and deselecting lands back on the page, not the Archive.
+  const activeRail = (await page.locator('.rail-item.active .name').innerText()).trim();
+  assert(activeRail === 'The Skills', `rail stays on The Skills over the open session (${activeRail})`);
+  await page.locator('.rail-item', { hasText: 'The Skills' }).click();
+  await page.waitForTimeout(400);
+  assert((await page.locator('.archive-eyebrow').innerText()).trim().toLowerCase() === 'the skills',
+    'closing the session returns to The Skills');
 
   // Scoped state: a project with sessions but no skill usage. The columns
   // empty out while the hero and flags stay archive-true.

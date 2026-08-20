@@ -4,7 +4,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { costOf } from '../lib/pricing.js';
 import { buildResumeCmd } from '../lib/resume.js';
-import { BUILTIN_COMMANDS } from '../lib/builtin-commands.js';
+import { BUILTIN_COMMANDS, BUNDLED_SKILLS } from '../lib/builtin-commands.js';
 
 const api = window.hindcast;
 
@@ -929,15 +929,21 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
     // into the installed ones; idle is an installed-only flag, since an
     // uninstalled skill needs no pruning nudge.
     const now = Date.now();
-    const stats = { installed: 0, fired: 0, neverFired: 0, idle: 0, gone: 0 };
+    const stats = { installed: 0, fired: 0, neverFired: 0, idle: 0, bundled: 0, gone: 0 };
     for (const e of classified) {
+      // Skills shipped inside Claude Code are invisible to the inventory
+      // join; split them from the true prune story (removed skills, drifted
+      // plugin spellings). A locally installed copy of a bundled name
+      // counts as installed.
+      e.bundled = !e.installed && BUNDLED_SKILLS.has(e.name);
       if (e.installed) {
         stats.installed++;
         if (e.allCount > 0) stats.fired++;
         else stats.neverFired++;
         if (e.allCount > 0 && now - e.allLastTs > 60 * 864e5) stats.idle++;
       } else if (e.allCount > 0) {
-        stats.gone++;
+        if (e.bundled) stats.bundled++;
+        else stats.gone++;
       }
     }
 
@@ -963,8 +969,8 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
             <>Of <em>{st.installed}</em> installed skills, <em>{st.neverFired}</em> {st.neverFired === 1 ? 'has' : 'have'} never fired.</>
           ) : st.installed > 0 ? (
             <>All <em>{st.installed}</em> installed skills have fired.</>
-          ) : st.gone > 0 ? (
-            <><em>{st.gone}</em> skills have fired across the archive.</>
+          ) : st.gone + st.bundled > 0 ? (
+            <><em>{st.gone + st.bundled}</em> skills have fired across the archive.</>
           ) : (
             <>No skills have fired yet.</>
           )}
@@ -980,6 +986,7 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
           <div className="stat"><div className="num">{st.fired}</div><div className="lbl">have fired</div></div>
           <div className="stat"><div className="num">{st.neverFired}</div><div className="lbl">never fired</div></div>
           <div className="stat"><div className="num">{st.idle}</div><div className="lbl">idle 60+ days</div></div>
+          <div className="stat"><div className="num">{st.bundled}</div><div className="lbl">bundled</div></div>
           <div className="stat"><div className="num">{st.gone}</div><div className="lbl">fired, not installed</div></div>
         </div>
       </div>
@@ -1024,7 +1031,10 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
                               idle {Math.floor((Date.now() - r.allLastTs) / 864e5)}d
                             </span>
                           )}
-                          {!r.installed && r.allCount > 0 && (
+                          {r.bundled && r.allCount > 0 && (
+                            <span className="model-chip skill-flag" title="ships inside Claude Code; not part of your inventory">bundled</span>
+                          )}
+                          {!r.installed && !r.bundled && r.allCount > 0 && (
                             <span className="model-chip skill-flag" title="fired in the archive but absent from the current inventory">not installed</span>
                           )}
                         </td>
@@ -1981,6 +1991,15 @@ function App() {
     setSearchOpen(false);
   };
 
+  // The skills click-through keeps view and project scope untouched: the
+  // rail stays on The Skills while the session is open, and deselecting
+  // lands back on the page you came from, not the Archive. Search wants
+  // the reset above; this path must not inherit it.
+  const openFromSkills = (session, uuid) => {
+    setSelectedSession(session.id);
+    setJumpToUuid(uuid || null);
+  };
+
   const dayInRange = useMemo(() => makeDayInRange(dateFilter), [dateFilter]);
 
   return (
@@ -2025,7 +2044,7 @@ function App() {
                   dayInRange={dayInRange}
                   dateFilter={dateFilter}
                   skillInventory={index.skillInventory || []}
-                  onOpenSession={openFromSearch}
+                  onOpenSession={openFromSkills}
                 />
             : view === 'ledger'
               ? <Ledger sessions={filteredSessions} dayInRange={dayInRange} modelFilter={modelFilter} />
