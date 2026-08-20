@@ -139,6 +139,7 @@ body {
 .rail-brand .brand-mark svg { display: block; }
 
 .rail-fixed { padding: 0 10px; }
+.rail-list-head { padding: 0 10px; }
 .rail-list { overflow-y: auto; flex: 1; min-height: 0; padding: 0 10px 16px; }
 
 .rail-filter {
@@ -164,13 +165,16 @@ body {
   color: var(--putty-dim);
 }
 
+/* A rank above the old 9.5px putty-dim: the rail should scan as three
+   levels (The Archive, The Ledger, Projects), but the label must not
+   reach rail-item size or it reads as a clickable row. */
 .rail-section {
   font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
+  font-size: 11px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--putty-dim);
-  padding: 14px 10px 6px;
+  color: var(--ink);
+  padding: 16px 10px 7px;
 }
 
 .rail-item {
@@ -596,6 +600,37 @@ body {
 .ledger-method {
   font-size: 12.5px; color: var(--putty); max-width: 70ch; margin: 0;
 }
+
+/* ── skills (inside the ledger) ── */
+
+/* Only the name column may wrap (long plugin ids); a date broken across
+   two lines reads as clutter. */
+.skills-table td:not(.name), .skills-table th:not(.name) { white-space: nowrap; }
+.skills-table td.name { color: var(--ink-dim); max-width: 280px; }
+.skills-table .twist {
+  display: inline-block; width: 10px;
+  font-size: 8px; color: var(--putty-dim); margin-right: 6px;
+}
+tr.skill-row:hover td { background: var(--bg-hover); }
+.skill-flag { color: var(--putty-dim); margin-left: 7px; }
+td.trend { width: 84px; }
+.skill-trend { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.skill-trend i { display: block; width: 4px; border-radius: 1px; background: var(--brass-dim); }
+.skill-trend i.zero { height: 2px; background: var(--line); }
+tr.skill-detail td { padding: 0 10px 10px 27px; }
+.skill-session {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 4px 8px; border-radius: 6px; cursor: default;
+}
+.skill-session:hover { background: var(--bg-hover); }
+.skill-session .t {
+  font-family: var(--sans); font-size: 12px; color: var(--ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.skill-session .p { color: var(--brass-dim); flex-shrink: 0; }
+.skill-session .n { color: var(--putty-dim); flex-shrink: 0; }
+.skill-none { padding: 4px 8px; font-size: 10.5px; color: var(--putty-dim); }
+.ledger-method + .ledger-method { margin-top: 8px; }
 
 /* ── the tape (signature element) ── */
 

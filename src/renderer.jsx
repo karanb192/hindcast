@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { costOf } from '../lib/pricing.js';
 import { buildResumeCmd } from '../lib/resume.js';
+import { BUILTIN_COMMANDS } from '../lib/builtin-commands.js';
 
 const api = window.hindcast;
 
@@ -95,7 +96,7 @@ function SpoolMark({ size = 20 }) {
   );
 }
 
-const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filtersActive, themePref, setThemePref, view }) {
+const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessions, projectCounts, filtersActive, themePref, setThemePref, view, skillCount }) {
   // Local query: typing here re-renders only the rail, never the app.
   const [projectQuery, setProjectQuery] = useState('');
   const filterVisible = projects.length > 8;
@@ -130,8 +131,17 @@ const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessi
           <span className="name">The Ledger</span>
           <span className="count">$</span>
         </div>
+        <div
+          className={'rail-item' + (view === 'skills' ? ' active' : '')}
+          onClick={() => onSelect(selected, 'skills')}
+        >
+          <span className="name">The Skills</span>
+          <span className="count">{skillCount}</span>
+        </div>
       </div>
-      <div className="rail-list">
+      {/* Label and filter sit outside the scroll container, so a scrolled
+          project list stays named and filterable. */}
+      <div className="rail-list-head">
         <div className="rail-section">Projects</div>
         {filterVisible && (
           <input
@@ -141,6 +151,8 @@ const Rail = React.memo(function Rail({ projects, selected, onSelect, totalSessi
             onChange={(e) => setProjectQuery(e.target.value)}
           />
         )}
+      </div>
+      <div className="rail-list">
         {projectQuery.trim() !== '' && shownProjects.length === 0 && (
           <div className="rail-empty">no matching projects</div>
         )}
@@ -632,6 +644,13 @@ function periodLabel(key, group) {
   return group === 'week' ? 'wk of ' + label : label;
 }
 
+const pad2 = (n) => String(n).padStart(2, '0');
+// Local day key, same 'YYYY-MM-DD' convention as s.daily and makeDayInRange.
+const dayKeyOf = (ts) => {
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+};
+
 function Ledger({ sessions, dayInRange, modelFilter }) {
   const [group, setGroup] = useState('day');
   const dayOk = dayInRange || (() => true);
@@ -804,6 +823,272 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
           writes at 1.25× (5-minute) and 2× (1-hour) input rate. Usage is deduplicated by API
           message id. Models without a known price are counted in tokens but excluded from cost.
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------- the skills (inventory & firings) ----------
+
+function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInventory, onOpenSession }) {
+  const [openSkill, setOpenSkill] = useState(null); // name of the one expanded row, or null
+  const dayOk = dayInRange || (() => true);
+  const skillAll = allSessions || scopeSessions;
+
+  // Aggregates s.skills entirely in memory; the page does zero file IO.
+  // Two session lists feed it. skillAll is the whole archive: the hero, the
+  // never-fired and idle flags, and the skill-vs-builtin classification
+  // claim all-time truth, so any narrowing would make them lie.
+  // scopeSessions is project-scoped only: the columns honor the date filter
+  // per record (dayOk) and ignore the model filter, since a skill
+  // invocation carries no model.
+  const skills = useMemo(() => {
+    // Fixed 12-month window, oldest first. It ends at the custom range's
+    // upper bound when one is set, so a range older than the window still
+    // draws bars; a range spanning more than 12 months keeps its oldest
+    // records in the counts but off the strip.
+    const months = [];
+    const end = dateFilter && dateFilter.preset === 'custom' && dateFilter.to
+      ? new Date(dateFilter.to + 'T12:00:00') : new Date();
+    for (let i = 11; i >= 0; i--) {
+      const m = new Date(end.getFullYear(), end.getMonth() - i, 1);
+      months.push(m.getFullYear() + '-' + pad2(m.getMonth() + 1));
+    }
+
+    const byName = new Map();
+    const entry = (name) => {
+      let e = byName.get(name);
+      if (!e) {
+        e = {
+          name, installed: false, source: null,
+          allCount: 0, allClaude: 0, allLastTs: 0, // archive-wide; feed the flags and classification
+          count: 0, claude: 0, you: 0,             // scope + date filter; feed the columns
+          firstTs: null, lastTs: null,
+          byMonth: new Map(),                      // 'YYYY-MM' -> count, date-filtered
+          sessions: new Map(),                     // sessionId -> { s, count, ts, uuid }
+        };
+        byName.set(name, e);
+      }
+      return e;
+    };
+
+    // Names that ever arrived as a system local_command line; with the
+    // hardcoded set, the builtin side of classification.
+    const builtinSeen = new Set();
+    for (const s of skillAll) {
+      for (const n of Object.keys(s.builtins || {})) builtinSeen.add(n);
+      for (const r of (s.skills || [])) {
+        if (!r || !r.n || !r.ts) continue;
+        const e = entry(r.n);
+        e.allCount++;
+        if (r.t === 'claude') e.allClaude++;
+        if (r.ts > e.allLastTs) e.allLastTs = r.ts;
+      }
+    }
+    for (const s of scopeSessions) {
+      for (const r of (s.skills || [])) {
+        if (!r || !r.n || !r.ts) continue;
+        if (!dayOk(dayKeyOf(r.ts))) continue;
+        const e = entry(r.n);
+        e.count++;
+        if (r.t === 'claude') e.claude++; else e.you++;
+        if (!e.firstTs || r.ts < e.firstTs) e.firstTs = r.ts;
+        if (!e.lastTs || r.ts > e.lastTs) e.lastTs = r.ts;
+        const mk = dayKeyOf(r.ts).slice(0, 7);
+        e.byMonth.set(mk, (e.byMonth.get(mk) || 0) + 1);
+        const line = e.sessions.get(s.id) || { s, count: 0, ts: r.ts, uuid: r.u };
+        line.count++;
+        // The jump lands on the session's earliest firing of this skill.
+        if (r.ts < line.ts) { line.ts = r.ts; line.uuid = r.u; }
+        e.sessions.set(s.id, line);
+      }
+    }
+    for (const it of (skillInventory || [])) {
+      if (it && it.name) {
+        const e = entry(it.name);
+        e.installed = true;
+        e.source = it.source || null;
+      }
+    }
+
+    // Typed builtins ride the same command wrappers as typed skills, so the
+    // scanner ships them undistinguished. A name stays if the Skill tool
+    // ever fired it or it is installed; otherwise it is dropped as a
+    // builtin when the set or a local_command sighting says so. What
+    // remains (typed-only, not installed, not builtin) is typically a
+    // since-removed skill, which must keep showing.
+    const classified = [...byName.values()].filter((e) =>
+      e.allClaude > 0 || e.installed ||
+        !(builtinSeen.has(e.name) || BUILTIN_COMMANDS.has(e.name)));
+
+    // Hero and stat-row numbers are archive-true like the flags: filters
+    // never change what is installed or what never fired. The row's algebra
+    // must close under a reader's subtraction: installed = have fired +
+    // never fired. Skills that fired but sit outside today's inventory
+    // (removed skills, bare plugin names) get their own stat and never mix
+    // into the installed ones; idle is an installed-only flag, since an
+    // uninstalled skill needs no pruning nudge.
+    const now = Date.now();
+    const stats = { installed: 0, fired: 0, neverFired: 0, idle: 0, gone: 0 };
+    for (const e of classified) {
+      if (e.installed) {
+        stats.installed++;
+        if (e.allCount > 0) stats.fired++;
+        else stats.neverFired++;
+        if (e.allCount > 0 && now - e.allLastTs > 60 * 864e5) stats.idle++;
+      } else if (e.allCount > 0) {
+        stats.gone++;
+      }
+    }
+
+    // The archive-wide pass also names skills fired only outside the
+    // current scope or filter; those rows show only when installed
+    // (carrying their flags), so the table keeps following the view.
+    const rows = classified
+      .filter((e) => e.count > 0 || e.installed)
+      // Fired skills by in-filter count, then all-time count, then name;
+      // installed-never-fired rows sink to the bottom alphabetically.
+      .sort((a, b) =>
+        (b.count - a.count) || (b.allCount - a.allCount) || (a.name < b.name ? -1 : 1));
+    return { rows, months, stats };
+  }, [scopeSessions, skillAll, dayInRange, dateFilter, skillInventory]);
+
+  const st = skills.stats;
+  return (
+    <div className="archive">
+      <div className="archive-hero">
+        <div className="archive-eyebrow">The Skills</div>
+        <div className="archive-title">
+          {st.installed > 0 && st.neverFired > 0 ? (
+            <>Of <em>{st.installed}</em> installed skills, <em>{st.neverFired}</em> {st.neverFired === 1 ? 'has' : 'have'} never fired.</>
+          ) : st.installed > 0 ? (
+            <>All <em>{st.installed}</em> installed skills have fired.</>
+          ) : st.gone > 0 ? (
+            <><em>{st.gone}</em> skills have fired across the archive.</>
+          ) : (
+            <>No skills have fired yet.</>
+          )}
+        </div>
+        <div className="archive-sub">
+          Every invocation read from the transcripts, whether Claude loaded the skill or
+          you typed the slash command, deduplicated across forked and resumed sessions.
+          Counts follow the project scope and the date filter; the model filter does not
+          apply, and the never-fired and idle flags always speak for the whole archive.
+        </div>
+        <div className="stat-row">
+          <div className="stat"><div className="num">{st.installed}</div><div className="lbl">installed</div></div>
+          <div className="stat"><div className="num">{st.fired}</div><div className="lbl">have fired</div></div>
+          <div className="stat"><div className="num">{st.neverFired}</div><div className="lbl">never fired</div></div>
+          <div className="stat"><div className="num">{st.idle}</div><div className="lbl">idle 60+ days</div></div>
+          <div className="stat"><div className="num">{st.gone}</div><div className="lbl">fired, not installed</div></div>
+        </div>
+      </div>
+
+      <div className="archive-section">
+        <h3>By skill</h3>
+        {skills.rows.length === 0 ? (
+          <p className="ledger-method">
+            No skill invocations in this view. When a session fires a skill, whether
+            Claude loads it or you type the slash command, it shows up here with its
+            full history.
+          </p>
+        ) : (
+          <div className="ledger-table-wrap">
+            <table className="ledger-table skills-table">
+              <thead><tr>
+                <th className="l">skill</th><th>fired</th><th>claude</th><th>you</th>
+                <th>sessions</th><th>first</th><th>last</th><th></th>
+              </tr></thead>
+              <tbody>
+                {skills.rows.map((r) => {
+                  const open = openSkill === r.name;
+                  const expandable = r.allCount > 0;
+                  const num = (n) => n ? n : ''; // zeros render blank; the chips carry the story
+                  const trendMax = Math.max(...skills.months.map((m) => r.byMonth.get(m) || 0), 1);
+                  return (
+                    <React.Fragment key={r.name}>
+                      <tr
+                        className={expandable ? 'skill-row' : undefined}
+                        onClick={expandable ? () => setOpenSkill(open ? null : r.name) : undefined}
+                      >
+                        <td className="l name">
+                          <span className="twist">{expandable ? (open ? '▼' : '▶') : ''}</span>
+                          {r.name}
+                          {r.installed && r.allCount === 0 && (
+                            <span className="model-chip skill-flag" title={(r.source === 'plugin'
+                              ? 'provided by an installed plugin'
+                              : 'installed under ~/.claude/skills') + ' but never fired in any indexed session'}>never fired</span>
+                          )}
+                          {r.installed && r.allCount > 0 && Date.now() - r.allLastTs > 60 * 864e5 && (
+                            <span className="model-chip skill-flag" title={'last fired ' + fmtDate(r.allLastTs)}>
+                              idle {Math.floor((Date.now() - r.allLastTs) / 864e5)}d
+                            </span>
+                          )}
+                          {!r.installed && r.allCount > 0 && (
+                            <span className="model-chip skill-flag" title="fired in the archive but absent from the current inventory">not installed</span>
+                          )}
+                        </td>
+                        <td>{num(r.count)}</td>
+                        <td>{num(r.claude)}</td>
+                        <td>{num(r.you)}</td>
+                        <td>{num(r.sessions.size)}</td>
+                        <td>{r.firstTs ? fmtDate(r.firstTs) : ''}</td>
+                        <td>{r.lastTs ? fmtDate(r.lastTs) : ''}</td>
+                        <td className="trend">
+                          {r.count > 0 && (
+                            <span className="skill-trend">
+                              {skills.months.map((m) => {
+                                const n = r.byMonth.get(m) || 0;
+                                return (
+                                  <i
+                                    key={m}
+                                    className={n ? '' : 'zero'}
+                                    style={n ? { height: (3 + Math.round(11 * n / trendMax)) + 'px' } : undefined}
+                                    title={periodLabel(m, 'month') + ': ' + n}
+                                  />
+                                );
+                              })}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="skill-detail">
+                          <td colSpan={8} className="l">
+                            {(() => {
+                              const lines = [...r.sessions.values()].sort((a, b) => b.ts - a.ts);
+                              if (lines.length === 0) {
+                                return (
+                                  <div className="skill-none">
+                                    None of this skill's sessions are in this view. They may sit outside the
+                                    date filter, or their transcripts have been pruned from disk.
+                                  </div>
+                                );
+                              }
+                              return (
+                                <>
+                                  {lines.slice(0, 30).map((ln) => (
+                                    <div className="skill-session" key={ln.s.id} onClick={() => onOpenSession(ln.s, ln.uuid)}>
+                                      <span className="t">{ln.s.title || 'Untitled session'}</span>
+                                      <span className="p">{(ln.s.projectPath || '').split('/').pop()}</span>
+                                      <span>{fmtDate(ln.ts)}</span>
+                                      {ln.count > 1 && <span className="n">x{ln.count}</span>}
+                                    </div>
+                                  ))}
+                                  {lines.length > 30 && <div className="skill-none">+{lines.length - 30} more sessions</div>}
+                                </>
+                              );
+                            })()}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1254,7 +1539,9 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
     setSaveErr(false);
     jumpedRef.current = null;
     let alive = true;
-    api.readSession(sessionId).then((d) => { if (alive) setData(d); });
+    // null means the id is gone from the index (transcript pruned between
+    // refreshes); keep it distinct from "still loading" or the view spins.
+    api.readSession(sessionId).then((d) => { if (alive) setData(d || { missing: true }); });
     return () => { alive = false; };
   }, [sessionId]);
 
@@ -1269,6 +1556,15 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
 
   if (!data) {
     return <div className="stage"><div className="empty"><div className="glyph">◉</div><div className="sub">loading reel…</div></div></div>;
+  }
+
+  if (data.missing) {
+    return (
+      <div className="stage"><div className="empty">
+        <div className="glyph">◌</div>
+        <div className="sub">this session is no longer in the index; its transcript was likely pruned from disk</div>
+      </div></div>
+    );
   }
 
   if (openAgent) {
@@ -1481,6 +1777,23 @@ const sameTokens = (a, b) =>
   a.input === b.input && a.output === b.output &&
   a.cacheRead === b.cacheRead && a.cacheWrite === b.cacheWrite;
 
+// Global claiming can move a skill record between files without touching the
+// file itself (a restored older transcript claims ids a newer fork held), so
+// records are compared, not assumed stable under mtime+size.
+const sameSkills = (a, b) => {
+  const ra = a.skills || [], rb = b.skills || [];
+  if (ra.length !== rb.length) return false;
+  for (let i = 0; i < ra.length; i++) {
+    if (ra[i].n !== rb[i].n || ra[i].t !== rb[i].t ||
+        ra[i].u !== rb[i].u || ra[i].ts !== rb[i].ts) return false;
+  }
+  const ba = a.builtins || {}, bb = b.builtins || {};
+  const ka = Object.keys(ba);
+  if (ka.length !== Object.keys(bb).length) return false;
+  for (const k of ka) if (ba[k] !== bb[k]) return false;
+  return true;
+};
+
 function mergeIndex(prev, next) {
   const prevSessions = new Map(prev.sessions.map((s) => [s.id, s]));
   let sessionsSame = prev.sessions.length === next.sessions.length;
@@ -1491,7 +1804,7 @@ function mergeIndex(prev, next) {
     // its project attribution alive.
     if (p && p.mtime === s.mtime && p.size === s.size && p.filePath === s.filePath &&
         p.title === s.title && p.lastTs === s.lastTs && p.toolCalls === s.toolCalls &&
-        sameTokens(p.tokens, s.tokens)) {
+        sameTokens(p.tokens, s.tokens) && sameSkills(p, s)) {
       if (prev.sessions[i] !== p) sessionsSame = false;
       return p;
     }
@@ -1510,23 +1823,29 @@ function mergeIndex(prev, next) {
     projectsSame = false;
     return n;
   });
-  if (sessionsSame && projectsSame && prev.indexing === next.indexing) return prev;
+  // Preserve the inventory's identity when its content is unchanged, so a
+  // quiet rescan does not recompute the skills memo downstream.
+  const pi = prev.skillInventory || [], ni = next.skillInventory || [];
+  const invSame = pi.length === ni.length &&
+    ni.every((it, i) => pi[i] && pi[i].name === it.name && pi[i].source === it.source);
+  if (sessionsSame && projectsSame && invSame && prev.indexing === next.indexing) return prev;
   return {
     projects: projectsSame ? prev.projects : projects,
     sessions: sessionsSame ? prev.sessions : sessions,
+    skillInventory: invSame ? pi : ni,
     indexing: next.indexing,
   };
 }
 
 function App() {
-  const [index, setIndex] = useState({ projects: [], sessions: [], indexing: true });
+  const [index, setIndex] = useState({ projects: [], sessions: [], skillInventory: [], indexing: true });
   const [progress, setProgress] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
   const [jumpToUuid, setJumpToUuid] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchSeed, setSearchSeed] = useState('');
-  const [view, setView] = useState('archive'); // 'archive' | 'ledger'
+  const [view, setView] = useState('archive'); // 'archive' | 'ledger' | 'skills'
   const [dateFilter, setDateFilter] = useState({ preset: 'all', from: null, to: null });
   const [modelFilter, setModelFilter] = useState(new Set());
   const [themePref, setThemePref] = useState(() => localStorage.getItem('hindcast-theme') || 'auto');
@@ -1676,6 +1995,7 @@ function App() {
         filtersActive={anyFilter}
         themePref={themePref}
         setThemePref={setThemePref}
+        skillCount={(index.skillInventory || []).length}
       />
       <SessionList
         key={selectedProject || '(all)'} /* remount on scope change clears the title query (also resets list scroll and dropdown state, which the old App-owned clear did not) */
@@ -1698,6 +2018,15 @@ function App() {
         <Boundary resetKey={[selectedSession || 'none', view, selectedProject || 'all', dateFilter.preset, modelFilter.size].join('|')}>
           {selectedSession
             ? <SessionView sessionId={selectedSession} jumpToUuid={jumpToUuid} theme={resolvedTheme} />
+            : view === 'skills'
+              ? <Skills
+                  scopeSessions={visibleSessions}
+                  allSessions={index.sessions}
+                  dayInRange={dayInRange}
+                  dateFilter={dateFilter}
+                  skillInventory={index.skillInventory || []}
+                  onOpenSession={openFromSearch}
+                />
             : view === 'ledger'
               ? <Ledger sessions={filteredSessions} dayInRange={dayInRange} modelFilter={modelFilter} />
               : <Archive

@@ -69,6 +69,8 @@ files stayed young. Raise yours before the pruner gets to your history.
   usage and cost view: per-day / per-week / per-month tables with per-model
   breakdowns, estimated dollar cost at published API rates, and a last-7-days
   figure.
+- **The Skills**: which installed skills actually fire, and which never do;
+  see below.
 - **Instant filtering**: type-to-filter the session list by title with zero
   keystroke lag, plus date presets, a custom range, and a model multi-select.
   Filters drive both the list and the Archive stats.
@@ -79,6 +81,24 @@ files stayed young. Raise yours before the pruner gets to your history.
   own tape with a back link.
 - **Dark, light, and auto themes**, persisted so the window paints the right
   color from the first frame.
+
+## Which skills actually fire
+
+Skills are install-and-forget: every one you add loads into context each
+session, and nothing tells you which ones ever run. Anthropic closed the
+[skill analytics request](https://github.com/anthropics/claude-code/issues/35319)
+as not planned, so people prune by gut feeling or not at all. When I finally
+counted, 5 of my 17 installed skills had never fired once.
+
+The Skills page reads the answer out of the transcripts and opens with it:
+"Of 43 installed skills, 28 have never fired." Below that, every skill with
+how often it fired, split by whether Claude loaded it or you typed the slash
+command, distinct sessions, first and last fired, and a 12-month trend.
+Installed skills that never fired get called out, so do ones idle for 60+
+days. Counts are deduplicated across forked and resumed sessions, the
+double-count trap that catches naive counters. And a count here is not the
+end of the story: expand a skill, click a session, and the tape lands on the
+exact invocation.
 
 ## Run from source
 
