@@ -22,7 +22,7 @@ const { chromium } = require('playwright-core');
   for (let i = 0; i < Math.min(items.length, 15); i++) {
     await items[i].click();
     const n = await stableCount();
-    if (n > 150) { console.log(`session ${i}: ${n} events — using it`); nEvents = n; break; }
+    if (n > 150) { console.log(`session ${i}: ${n} events - using it`); nEvents = n; break; }
   }
   if (!nEvents) { nEvents = await stableCount(); console.log(`fallback session (${nEvents} events)`); }
 
@@ -30,8 +30,8 @@ const { chromium } = require('playwright-core');
   const box = await tape.boundingBox();
 
   // The playhead draws at (index at reference line) / (n-1). Verify that after
-  // a click at fraction f, that index equals round(f*(n-1)) — i.e. the cursor
-  // lands under the click — and the target event is on screen.
+  // a click at fraction f, that index equals round(f*(n-1)): i.e. the cursor
+  // lands under the click: and the target event is on screen.
   const probe = (idx) => page.evaluate((expected) => {
     const boxEl = document.querySelector('.transcript');
     const n = document.querySelectorAll('[id^="ev-"]').length;
