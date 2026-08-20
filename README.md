@@ -39,13 +39,11 @@ brew tap karanb192/tap
 brew trust karanb192/tap
 brew install --cask hindcast
 brew install ripgrep    # search engine; without it ⌘K matches titles only
-xattr -rd com.apple.quarantine /Applications/Hindcast.app
 ```
 
-Apple Silicon only for now. The `xattr` step is needed because the app isn't
-notarized yet (Developer ID enrollment in progress); it disappears in an
-upcoming signed release. Prefer a download? Grab the DMG from
-[Releases](https://github.com/karanb192/hindcast/releases).
+Apple Silicon only for now. Builds are signed and notarized (Developer ID),
+so the app opens first try, no Gatekeeper hoops. Prefer a download? Grab the
+DMG from [Releases](https://github.com/karanb192/hindcast/releases).
 
 One thing worth doing today: Claude Code prunes transcripts by file age,
 `cleanupPeriodDays` in `~/.claude/settings.json`, default 30 days. Hindcast
@@ -181,8 +179,6 @@ never applied to it.
 
 ## Roadmap
 
-- **Signed + notarized builds**: an unsigned DMG ships today; Developer ID
-  enrollment is pending, and the `xattr` step dies with it.
 - [Bundle ripgrep](https://github.com/karanb192/hindcast/issues/5) so search
   works with zero setup.
 - [An opt-in vault](https://github.com/karanb192/hindcast/issues/3) so your
