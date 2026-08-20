@@ -50,8 +50,11 @@
       ],
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",
-      "identity": null,
-      "hardenedRuntime": false
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "notarize": true
     },
     "publish": {
       "provider": "github",
