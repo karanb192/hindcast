@@ -352,6 +352,28 @@ const SKILL_FORK = SKILL_PARENT + '\n' + j(
     assert(costOf('claude-opus-4-8', null) === null, 'null usage → null');
     assert(priceFor(null) === null && priceFor('') === null, 'null/empty id');
   });
+  await check('pricing: OpenAI ids resolve most-specific first, cached rate per model', async () => {
+    const assert = (c, msg) => { if (!c) throw new Error(msg); };
+    assert(priceFor('gpt-6.1-sol').input === 2 && priceFor('gpt-6.1-sol').cacheRead === 0.1, 'gpt-6.1-sol');
+    assert(priceFor('gpt-5.6-sol').input === 4, 'gpt-5.6-sol must not fall to gpt-5');
+    assert(priceFor('gpt-5-codex').input === 1.25, 'gpt-5-codex prices as gpt-5');
+    assert(priceFor('gpt-5.1-codex-mini').input === 0.25, 'codex-mini before gpt-5.1');
+    assert(Math.abs(costOf('gpt-6.1-sol', { in: 0, out: 0, cr: 1e6, w5: 1e6, w1: 0 }) - (0.1 + 2.5)) < 1e-9, 'cached read + 30m write');
+    assert(priceFor('codex-auto-review') === null, 'unpublished model stays unpriced');
+  });
+  await check('pricing: provider classification', async () => {
+    const { providerOf } = require('../lib/pricing');
+    if (priceFor('global.anthropic.claude-sonnet-4-5-20250929-v1:0').input !== 3) throw new Error('global Bedrock id unpriced');
+    const want = { 'claude-opus-4-8': 'anthropic', 'us.anthropic.claude-opus-4-8-v1:0': 'anthropic', 'anthropic.claude-3-haiku': 'anthropic',
+      'global.anthropic.claude-sonnet-4-5-20250929-v1:0': 'anthropic',
+      'gpt-6.1-sol': 'openai', 'codex-auto-review': 'openai', 'o3': 'openai', 'gpt-daybreak-blue-latest': 'openai',
+      'gemini-3-pro': 'other', '': 'other', null: 'other' };
+    for (const [id, p] of Object.entries(want)) {
+      const got = providerOf(id === 'null' ? null : id);
+      if (got !== p) throw new Error(`${id}: got ${got}, want ${p}`);
+    }
+  });
+
 
   // ---- search snippet helpers via the search module against a fixture dir ----
   await check('search: 2-char guard + no-match', async () => {

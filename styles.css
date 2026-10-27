@@ -321,6 +321,8 @@ body {
 .dd-name { flex: 1; font-family: var(--mono); font-size: 11px; }
 .dd-count { font-family: var(--mono); font-size: 10px; color: var(--putty-dim); }
 .dd-clear { border-top: 1px solid var(--line-soft); margin-top: 4px; color: var(--putty); }
+.dd-provider .dd-name { font-family: inherit; font-size: 11.5px; }
+.dd-sep { border-top: 1px solid var(--line-soft); margin: 4px 0; }
 .dd-empty { padding: 10px; font-family: var(--mono); font-size: 10.5px; color: var(--putty-dim); }
 
 .dd-range {
@@ -582,6 +584,7 @@ body {
 .ledger-table td.period { color: var(--ink-dim); white-space: nowrap; }
 .ledger-table td.cost { color: var(--brass); }
 .ledger-table td.models { max-width: 220px; }
+.ledger-table td.providers { white-space: nowrap; }
 .model-chip {
   display: inline-block;
   font-size: 9px; color: var(--putty);

@@ -136,8 +136,9 @@ To install it as a proper app, `npm run pack` builds `Hindcast.app` into
   repeat the same usage object, and resumed or forked sessions copy history
   verbatim. So usage is deduplicated globally by message id across every
   file, subagent transcripts included, the same approach ccusage takes.
-  Cache reads priced at 0.1x, 5-minute cache writes at 1.25x, 1-hour writes
-  at 2x (`lib/pricing.js`). Costs are estimates of API-equivalent value, not
+  Cache reads priced at 0.1x (OpenAI models at their published cached-input
+  rate), 5-minute cache writes at 1.25x, 1-hour writes at 2x
+  (`lib/pricing.js`). Costs are estimates of API-equivalent value, not
   an invoice.
 - The transcript format is officially internal to Claude Code, so parsing is
   deliberately tolerant: unknown line types and block types are skipped,
