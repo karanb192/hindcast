@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>Every Claude Code session you've ever run. Indexed, searchable, scrubbable.</b>
+  <b>Every Claude Code and Codex session you've ever run. Indexed, searchable, scrubbable.</b>
 </p>
 
 <p align="center">
@@ -15,7 +15,8 @@
 <p align="center">
   Find that session from three weeks ago, scrub through what the agent did,
   and resume it in your terminal with one paste. Local-first: it reads the
-  transcripts Claude Code already writes to <code>~/.claude/projects/</code>,
+  transcripts Claude Code already writes to <code>~/.claude/projects/</code>
+  and the rollouts OpenAI Codex writes to <code>~/.codex/sessions/</code>,
   and nothing leaves your Mac.
 </p>
 
@@ -39,6 +40,7 @@ brew tap karanb192/tap
 brew trust karanb192/tap
 brew install --cask hindcast
 brew install ripgrep    # search engine; without it ⌘K matches titles only
+brew install zstd       # Codex compresses older rollouts; without it only uncompressed ones load
 ```
 
 Apple Silicon only for now. Builds are signed and notarized (Developer ID),
@@ -117,6 +119,16 @@ To install it as a proper app, `npm run pack` builds `Hindcast.app` into
 
 ## How it works
 
+- **Codex** (`lib/codex.js`): reads OpenAI Codex rollouts from
+  `~/.codex/sessions/` and `~/.codex/archived_sessions/`, plain or
+  `.jsonl.zst` (decompressed through `zstd`). Titles come from Codex's
+  `session_index.jsonl`, else the first real prompt (injected AGENTS.md and
+  environment context are skipped). Subagent and auto-review threads fold
+  into their root session as subagent reels, usage included. Sessions in the
+  same repo as Claude sessions share its project, tagged `codex`, and their
+  resume chip copies `codex resume <thread id>`. Usage comes from each
+  response's usage record, or, in older rollouts, from the running token
+  count.
 - **Indexer** (`lib/scanner.js`): streams every top-level `*.jsonl`
   transcript, extracts the session title (custom-title > ai-title > first
   prompt), timestamps, models, token usage, and tool counts. Results are
@@ -151,10 +163,11 @@ accent. No neon.
 
 ## Local-only, by construction
 
-Hindcast reads `~/.claude/projects/` and writes to exactly two places, both
-its own: its user-data dir (index cache, theme, settings) and
-`~/Downloads/Hindcast Exports` when you click export. It never writes into
-`~/.claude/`, makes no network requests of its own, and has no telemetry.
+Hindcast reads `~/.claude/projects/` and `~/.codex/` and writes to exactly
+two places, both its own: its user-data dir (index cache, theme, settings)
+and `~/Downloads/Hindcast Exports` when you click export. It never writes
+into `~/.claude/` or `~/.codex/`, makes no network requests of its own, and
+has no telemetry.
 There is no API key to configure because it never calls Claude: it reads
 files on disk, and that's the whole trick. The 2026 back-and-forth over
 subscription auth for third-party agent tools

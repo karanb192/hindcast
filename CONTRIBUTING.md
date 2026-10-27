@@ -1,14 +1,15 @@
 # Contributing to Hindcast
 
 Thanks for your interest in Hindcast, a local-first viewer, timeline scrubber,
-and cost tracker for your Claude Code sessions.
+and cost tracker for your Claude Code and Codex sessions.
 
 ## Ground rules
 
 Hindcast is, and will stay, **read-only and local-first**. It only ever *reads*
-the transcript files Claude Code already writes to `~/.claude/projects/`. It must
-never send messages, drive sessions, or call the Anthropic API / Agent SDK; that
-boundary is what keeps it safe to use with any Claude Code subscription. Please
+the transcript files Claude Code already writes to `~/.claude/projects/` and the
+rollouts Codex writes under `~/.codex/`. It must never send messages, drive
+sessions, or call the Anthropic or OpenAI APIs / agent SDKs; that boundary is
+what keeps it safe to use with any Claude Code or ChatGPT subscription. Please
 don't propose changes that cross it.
 
 ## Development setup
@@ -26,6 +27,8 @@ run `node node_modules/electron/install.js` once, then `npm start`.
 - `main.js`: Electron main process (window, IPC, live re-index).
 - `preload.js`: the `window.hindcast` bridge (context-isolated).
 - `lib/scanner.js`: transcript indexing + parsing (branch walk, usage records).
+- `lib/codex.js`: Codex rollout reading (plain and zstd), metadata, tape parsing,
+  subagent grouping.
 - `lib/search.js`: ripgrep-backed full-text search.
 - `lib/pricing.js`: per-model $/MTok + cache multipliers.
 - `lib/export.js`: markdown / self-contained HTML export.

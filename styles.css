@@ -384,8 +384,15 @@ body {
   font-family: var(--mono); font-size: 9.5px;
   color: var(--putty-dim);
 }
-.session-card .sub .proj { color: var(--brass-dim); }
+.session-card .sub > span { white-space: nowrap; }
+.session-card .sub .proj { color: var(--brass-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .session-card .sub .sep { opacity: 0.5; }
+/* Marks a Codex session; Claude sessions stay unmarked, as they always were. */
+.agent-tag {
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--putty); border: 1px solid var(--line-soft); border-radius: 99px;
+  padding: 0 5px; line-height: 1.5; flex: none;
+}
 
 /* ─────────────────── right: main stage ─────────────────── */
 

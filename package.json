@@ -1,7 +1,7 @@
 {
   "name": "hindcast",
   "version": "0.1.3",
-  "description": "Browse, search, and replay every Claude Code session on your Mac. A local-first session viewer, timeline scrubber, and cost tracker.",
+  "description": "Browse, search, and replay every Claude Code and Codex session on your Mac. A local-first session viewer, timeline scrubber, and cost tracker.",
   "author": "Karan Bansal",
   "license": "MIT",
   "repository": {

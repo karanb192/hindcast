@@ -7,6 +7,8 @@ const { parseSession, extractMeta, foldSubagentUsage, claimSessionSkills, parseT
 const { search } = require('../lib/search');
 const { exportSession } = require('../lib/export');
 const { costOf, priceFor } = require('../lib/pricing');
+const codex = require('../lib/codex');
+const { execFileSync } = require('child_process');
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hindcast-torture-'));
 let pass = 0, fail = 0;
@@ -124,6 +126,69 @@ const SKILL_PARENT = j(
 const SKILL_FORK = SKILL_PARENT + '\n' + j(
   { type: 'assistant', uuid: 'fb2', parentUuid: 'fa1', timestamp: new Date(2026, 0, 3).toISOString(), message: { role: 'assistant', id: 'msg_f2', model: 'claude-opus-4-8', usage: { output_tokens: 1 }, content: [{ type: 'tool_use', id: 'toolu_fork2', name: 'Skill', input: { skill: 'oss-launch' } }] } }
 );
+
+// ---------- Codex rollouts ----------
+// Envelope lines as current Codex writes them: timestamp, ordinal, type, payload.
+let cxOrd = 0;
+const cx = (ts, type, payload) => ({ timestamp: new Date(2026, 9, 1, 10, 0, ts).toISOString(), ordinal: cxOrd++, type, payload });
+const CX_ID = '01a10000-0000-7000-8000-000000000001';
+const CX_ROLLOUT = j(
+  cx(0, 'session_meta', { id: CX_ID, session_id: CX_ID, cwd: '/Users/x/proj.app', cli_version: '0.160.1', originator: 'Codex Desktop', source: 'vscode', git: { branch: 'main' }, base_instructions: { text: 'You are Codex. needle-in-instructions' } }),
+  cx(1, 'event_msg', { type: 'task_started', turn_id: 't1' }),
+  cx(1, 'response_item', { type: 'message', id: 'm0', role: 'developer', content: [{ type: 'input_text', text: 'dev rules' }] }),
+  cx(2, 'response_item', { type: 'message', id: 'm1', role: 'user', content: [
+    { type: 'input_text', text: '# AGENTS.md instructions for /Users/x/proj.app\n\n<INSTRUCTIONS>\nbe nice\n</INSTRUCTIONS>' },
+    { type: 'input_text', text: '<environment_context>\n  <cwd>/Users/x/proj.app</cwd>\n</environment_context>' } ] }),
+  cx(3, 'response_item', { type: 'message', id: 'm2', role: 'user', content: [{ type: 'input_text', text: '# Files mentioned by the user:\n\n## a.png: /tmp/a.png\n\n## My request for Codex:\nFix the login bug' }, { type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] }),
+  cx(4, 'world_state', { full: true, state: { agents_md: { text: 'needle-in-world-state' } } }),
+  cx(4, 'turn_context', { turn_id: 't1', cwd: '/Users/x/proj.app', model: 'gpt-6.1-sol' }),
+  cx(5, 'response_item', { type: 'reasoning', id: 'r1', summary: [{ type: 'summary_text', text: '**Planning** the fix' }], encrypted_content: 'gAAAA' }),
+  cx(5, 'response_item', { type: 'reasoning', id: 'r2', summary: [], encrypted_content: 'gAAAA' }),
+  cx(6, 'response_item', { type: 'message', id: 'm3', role: 'assistant', phase: 'commentary', content: [{ type: 'output_text', text: 'Looking at the auth code.' }] }),
+  cx(7, 'response_item', { type: 'custom_tool_call', id: 'c1', status: 'completed', call_id: 'call_1', name: 'exec', input: 'const r = await tools.exec_command({cmd:"rg -n login src"});\ntext(r);' }),
+  cx(8, 'token_usage_record', { turn_id: 't1', response_id: 'resp_1', usage: { input_tokens: 1000, cached_input_tokens: 600, cache_write_input_tokens: 300, output_tokens: 50, reasoning_output_tokens: 20, total_tokens: 1050 } }),
+  cx(8, 'token_usage_record', { turn_id: 't1', response_id: 'resp_1', usage: { input_tokens: 1000, cached_input_tokens: 600, cache_write_input_tokens: 300, output_tokens: 50, reasoning_output_tokens: 20, total_tokens: 1050 } }),
+  cx(8, 'event_msg', { type: 'token_count', info: { total_token_usage: { total_tokens: 1050 }, last_token_usage: { input_tokens: 1000, output_tokens: 50 } } }),
+  cx(9, 'response_item', { type: 'custom_tool_call_output', id: 'o1', call_id: 'call_1', output: [{ type: 'input_text', text: 'Script failed\nWall time 0.0 seconds' }] }),
+  cx(10, 'response_item', { type: 'function_call', id: 'f1', name: 'js', namespace: 'mcp__cua_repl', arguments: '{"code":"await cua.getState();","title":"Inspect the page"}', call_id: 'call_2' }),
+  cx(11, 'response_item', { type: 'function_call_output', id: 'o2', call_id: 'call_2', output: 'ok needle-in-output' }),
+  cx(12, 'token_usage_record', { turn_id: 't1', response_id: 'resp_2', usage: { input_tokens: 2000, cached_input_tokens: 1000, cache_write_input_tokens: 0, output_tokens: 100, total_tokens: 2100 } }),
+  cx(13, 'event_msg', { type: 'item_completed', item: { type: 'AgentMessage', content: [{ type: 'Text', text: 'needle-in-echo' }] } }),
+  cx(13, 'compacted', { message: '', replacement_history: [] }),
+  cx(14, 'response_item', { type: 'message', id: 'm4', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: 'Fixed. needle-in-answer' }] }),
+  cx(15, 'event_msg', { type: 'turn_aborted', turn_id: 't1', reason: 'interrupted' }),
+  { type: 'quantum-flux', payload: 'nope' }
+);
+// Older rollouts have token_count only: totals repeat, and a compacted
+// continuation opens with one restated before any turn.
+const CX_OLD_ID = '01a10000-0000-7000-8000-000000000002';
+const CX_OLD = j(
+  cx(0, 'session_meta', { id: CX_OLD_ID, session_id: CX_OLD_ID, cwd: '/Users/x/proj.app', source: 'cli' }),
+  cx(0, 'event_msg', { type: 'token_count', info: { total_token_usage: { total_tokens: 900000 }, last_token_usage: { input_tokens: 9999, output_tokens: 999 } } }),
+  cx(1, 'turn_context', { turn_id: 'u1', model: 'gpt-5.6-terra' }),
+  cx(2, 'response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'old style prompt' }] }),
+  cx(3, 'event_msg', { type: 'token_count', info: { total_token_usage: { total_tokens: 110 }, last_token_usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 10 } } }),
+  cx(3, 'event_msg', { type: 'token_count', info: { total_token_usage: { total_tokens: 110 }, last_token_usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 10 } } }),
+  cx(4, 'event_msg', { type: 'token_count', info: null }),
+  cx(5, 'event_msg', { type: 'token_count', info: { total_token_usage: { total_tokens: 330 }, last_token_usage: { input_tokens: 200, output_tokens: 20 } } })
+);
+const cxSub = (id, root, source, nickname) => j(
+  cx(0, 'session_meta', { id, session_id: root, parent_thread_id: root, cwd: '/Users/x/proj.app', source, thread_source: 'subagent', agent_nickname: nickname }),
+  cx(1, 'turn_context', { turn_id: 's-' + id, model: 'gpt-6-luna' }),
+  cx(2, 'response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'sub work needle-in-subagent' }] }),
+  cx(3, 'token_usage_record', { turn_id: 's-' + id, response_id: 'resp_' + id, usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } })
+);
+const CX_SPAWN_ID = '01a10000-0000-7000-8000-00000000000a';
+const CX_GUARD_ID = '01a10000-0000-7000-8000-00000000000b';
+const CX_ORPHAN_ID = '01a10000-0000-7000-8000-00000000000c';
+const CX_GONE_ID = '01a10000-0000-7000-8000-0000000000ff';
+
+function writeRollout(dir, id, content) {
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, `rollout-2026-10-01T10-00-00-${id}.jsonl`);
+  fs.writeFileSync(p, content);
+  return p;
+}
 
 (async () => {
   // ---- parseSession + extractMeta on every fixture ----
@@ -362,6 +427,172 @@ const SKILL_FORK = SKILL_PARENT + '\n' + j(
     if (!Array.isArray(r1)) throw new Error('search must return array');
   });
 
+  // ---- Codex rollouts ----
+  const CXDIR = path.join(DIR, 'codex-home', 'sessions', '2026', '10', '01');
+  const cxMain = writeRollout(CXDIR, CX_ID, CX_ROLLOUT);
+  await check('codex meta: injected context skipped, prompt titled, tools named', async () => {
+    const m = await codex.extractCodexMeta(cxMain);
+    const want = { threadId: CX_ID, cwd: '/Users/x/proj.app', gitBranch: 'main', userTurns: 1, assistantMsgs: 2, toolCalls: 2, title: 'Fix the login bug' };
+    for (const [k, v] of Object.entries(want)) if (m[k] !== v) throw new Error(`${k}: got ${JSON.stringify(m[k])}`);
+    if (m.tools.exec !== 1 || m.tools.mcp__cua_repl__js !== 1) throw new Error('tools: ' + JSON.stringify(m.tools));
+    if (m.subagent !== null) throw new Error('top-level thread marked as subagent');
+  });
+  await check('codex usage: records dedupe by response id, token_count ignored, input split', async () => {
+    const m = await codex.extractCodexMeta(cxMain);
+    const { aggregateRecords } = require('../lib/scanner');
+    const { tokens } = aggregateRecords(m.usageRecords);
+    // resp_1: in 1000 - 600 cached - 300 written = 100; resp_2: 2000 - 1000 = 1000
+    if (tokens.input !== 1100 || tokens.output !== 150 || tokens.cacheRead !== 1600 || tokens.cacheWrite !== 300) {
+      throw new Error('tokens: ' + JSON.stringify(tokens));
+    }
+    if (m.models['gpt-6.1-sol'] !== 2) throw new Error('models: ' + JSON.stringify(m.models));
+    if (m.usageRecords.length !== 1) throw new Error('expected one record per day and model, got ' + m.usageRecords.length);
+  });
+  await check('codex usage: token_count fallback counts each response once, skips the restated one', async () => {
+    const m = await codex.extractCodexMeta(writeRollout(CXDIR, CX_OLD_ID, CX_OLD));
+    const { aggregateRecords } = require('../lib/scanner');
+    const { tokens } = aggregateRecords(m.usageRecords);
+    if (tokens.output !== 30 || tokens.input !== 260 || tokens.cacheRead !== 40) throw new Error('tokens: ' + JSON.stringify(tokens));
+    if (m.models['gpt-5.6-terra'] !== 2) throw new Error('models: ' + JSON.stringify(m.models));
+  });
+  await check('codex tape: kinds, injected context gone, results matched, line-number uuids', async () => {
+    const r = await codex.parseCodexSession(cxMain);
+    const kinds = r.events.map((e) => e.kind + (e.toolName ? ':' + e.toolName : '')).join(' ');
+    const want = 'user thinking assistant tool:exec tool:mcp__cua_repl__js compact assistant system';
+    if (kinds !== want) throw new Error('kinds:\n    got  ' + kinds + '\n    want ' + want);
+    const [user, , , exec, js] = r.events;
+    if (!user.text.endsWith('Fix the login bug') || user.images.length !== 1 || user.uuid !== 'L5') throw new Error('user event: ' + JSON.stringify(user).slice(0, 200));
+    if (!exec.isError || exec.toolSummary !== 'rg -n login src' || exec.resultUuid !== 'L15') throw new Error('exec event: ' + JSON.stringify(exec).slice(0, 300));
+    if (js.isError || js.toolSummary !== 'Inspect the page' || js.result !== 'ok needle-in-output') throw new Error('js event: ' + JSON.stringify(js).slice(0, 300));
+    if (r.events.some((e) => (e.text || '').includes('needle-in-echo'))) throw new Error('item_completed echo reached the tape');
+  });
+  await check('codex: subagents fold into their root, orphans stay, duplicates collapse', async () => {
+    const files = [
+      cxMain,
+      writeRollout(CXDIR, CX_SPAWN_ID, cxSub(CX_SPAWN_ID, CX_ID, { subagent: { thread_spawn: { parent_thread_id: CX_ID } } }, 'Ada')),
+      writeRollout(CXDIR, CX_GUARD_ID, cxSub(CX_GUARD_ID, CX_ID, { subagent: { other: 'guardian' } }, null)),
+      writeRollout(CXDIR, CX_ORPHAN_ID, cxSub(CX_ORPHAN_ID, CX_GONE_ID, { subagent: { thread_spawn: { parent_thread_id: CX_GONE_ID } } }, 'Lost')),
+      writeRollout(path.join(DIR, 'codex-home', 'archived_sessions'), CX_ID, CX_ROLLOUT), // archived copy of the same thread
+    ];
+    const entries = [];
+    for (const [i, fp] of files.entries()) entries.push({ filePath: fp, meta: await codex.extractCodexMeta(fp), size: 1, mtime: i === 4 ? 1 : 2 });
+    const mainRecs = entries[0].meta.usageRecords;
+    const before = mainRecs.length;
+    const { sessions, children, owners } = codex.assembleCodexSessions(entries, new Map([[CX_ID, 'Renamed thread']]));
+    const ids = sessions.map((s) => s.id).sort();
+    if (JSON.stringify(ids) !== JSON.stringify([CX_ID, CX_ORPHAN_ID].sort())) throw new Error('sessions: ' + JSON.stringify(ids));
+    const top = sessions.find((s) => s.id === CX_ID);
+    if (top.title !== 'Renamed thread' || top.agent !== 'codex' || top.project !== '-Users-x-proj-app') throw new Error('top: ' + JSON.stringify({ t: top.title, p: top.project }));
+    if (top.filePath !== cxMain) throw new Error('newest copy should win over the archived one');
+    if (top.subagentFiles !== 2 || children.get(CX_ID).length !== 2) throw new Error('children: ' + top.subagentFiles);
+    if (children.get(CX_ID).find((c) => c.kind === 'guardian').title !== 'auto-review') throw new Error('guardian label');
+    if (top.usageRecords.length !== before + 2 || mainRecs.length !== before) throw new Error('child usage must concat, never mutate cached meta');
+    if (!owners.get(files[1]) || owners.get(files[1]).id !== CX_ID || owners.get(files[1]).isMain) throw new Error('owner map');
+  });
+  await check('codex: malformed rollouts never throw', async () => {
+    const cases = {
+      empty: '', garbage: 'not json\n{ broken\n]]]', noNewline: j(cx(0, 'session_meta', { id: 'x' })),
+      huge: j(cx(0, 'response_item', { type: 'function_call_output', call_id: 'q', output: 'y'.repeat(3e6) })),
+      legacy: j({ id: CX_OLD_ID, timestamp: '2025-05-01T00:00:00Z', instructions: '' }, { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'pre-envelope prompt' }] }),
+      hostile: j({ timestamp: { toString: 'invalid' }, type: 'token_usage_record', payload: { response_id: 'r', usage: { output_tokens: 1 } } },
+        { timestamp: { toString: 'invalid' }, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'survives' }] } },
+        cx(0, 'response_item', { type: 'message', role: 'user', content: 'not an array' }), cx(1, 'response_item', { type: 'function_call', name: null, arguments: 5 }), cx(2, 'response_item', { type: 'reasoning', summary: 'x', content: {} }), cx(3, 'token_usage_record', { response_id: 'r', usage: 'nope' })),
+    };
+    for (const [name, content] of Object.entries(cases)) {
+      const fp = writeRollout(path.join(DIR, 'cx-bad'), '01a1ffff-0000-7000-8000-0000000000' + String(Object.keys(cases).indexOf(name)).padStart(2, '0'), content);
+      const m = await codex.extractCodexMeta(fp);
+      const r = await codex.parseCodexSession(fp);
+      if (typeof m.title !== 'string' || !Array.isArray(r.events)) throw new Error(name + ': bad shape');
+      if (name === 'legacy' && (m.userTurns !== 1 || m.threadId !== CX_OLD_ID)) throw new Error('legacy rollout not read: ' + JSON.stringify(m).slice(0, 200));
+      if (name === 'hostile' && !r.events.some((e) => e.text === 'survives')) throw new Error('an object timestamp took the rest of the rollout with it');
+    }
+  });
+  await check('codex: usage a subagent replays from its parent at creation is not counted', async () => {
+    const born = new Date(2026, 9, 2, 9, 0, 0).toISOString();
+    const later = new Date(2026, 9, 2, 9, 0, 5).toISOString();
+    const id = '01a10000-0000-7000-8000-0000000000d1';
+    const rollout = j(
+      { timestamp: born, type: 'session_meta', payload: { id, session_id: CX_ID, parent_thread_id: CX_ID, forked_from_id: CX_ID, source: { subagent: { thread_spawn: { parent_thread_id: CX_ID } } } } },
+      { timestamp: born, type: 'turn_context', payload: { turn_id: 'parent-turn', model: 'gpt-6-luna' } },
+      { timestamp: born, type: 'event_msg', payload: { type: 'task_started', turn_id: 'parent-turn' } },
+      { timestamp: born, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 5000 }, last_token_usage: { input_tokens: 900, output_tokens: 90 } } } },
+      { timestamp: born, type: 'token_usage_record', payload: { turn_id: 'parent-turn', response_id: 'resp_parent', usage: { input_tokens: 900, output_tokens: 90 } } },
+      { timestamp: later, type: 'event_msg', payload: { type: 'task_started', turn_id: 'own' } },
+      { timestamp: later, type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'own work' }] } },
+      { timestamp: later, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 5110 }, last_token_usage: { input_tokens: 100, output_tokens: 10 } } } }
+    );
+    const m = await codex.extractCodexMeta(writeRollout(path.join(DIR, 'cx-replay'), id, rollout));
+    const { aggregateRecords } = require('../lib/scanner');
+    const { tokens } = aggregateRecords(m.usageRecords);
+    if (tokens.output !== 10 || tokens.input !== 100) throw new Error('replayed usage counted: ' + JSON.stringify(tokens));
+  });
+  await check('codex: an over-long line is skipped but keeps its line number', async () => {
+    const fp = path.join(DIR, 'cx-long', 'rollout-2026-10-01T10-00-00-01a10000-0000-7000-8000-0000000000e1.jsonl');
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    const fd = fs.openSync(fp, 'w');
+    fs.writeSync(fd, JSON.stringify(cx(0, 'session_meta', { id: '01a10000-0000-7000-8000-0000000000e1', cwd: '/x' })) + '\n');
+    const block = Buffer.alloc(8 * 1024 * 1024, 120); // 'x' with no newline: one 72 MB line
+    for (let i = 0; i < 9; i++) fs.writeSync(fd, block);
+    fs.writeSync(fd, '\n' + JSON.stringify(cx(1, 'response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'after the long line' }] })) + '\n');
+    fs.closeSync(fd);
+    const m = await codex.extractCodexMeta(fp);
+    const r = await codex.parseCodexSession(fp);
+    fs.rmSync(fp);
+    if (m.userTurns !== 1 || m.events !== 2) throw new Error('meta: ' + JSON.stringify({ u: m.userTurns, e: m.events }));
+    if (r.events.length !== 1 || r.events[0].uuid !== 'L3') throw new Error('tape: ' + JSON.stringify(r.events.map((e) => e.uuid)));
+  });
+  await check('codex: only snake_case context wrappers count as injected', async () => {
+    const cases = [['<environment_context>\n<cwd>/x</cwd>\n</environment_context>', true], ['<recommended_plugins>x</recommended_plugins>', true],
+      ['# AGENTS.md instructions for /x', true], ['<request>Review this code</request>', false], ['<div>broken</div>', false], ['plain prompt', false]];
+    for (const [text, want] of cases) if (codex.isInjectedText(text) !== want) throw new Error(JSON.stringify(text) + ' should be ' + want);
+  });
+  await check('codex: .jsonl.zst reads the same as plain', async () => {
+    if (!codex.zstdBin()) return; // zstd not installed: compressed rollouts are skipped, nothing to compare
+    const zst = cxMain.replace(/\.jsonl$/, '.copy.jsonl.zst');
+    execFileSync(codex.zstdBin(), ['-q', '-f', '-o', zst, cxMain]);
+    const [a, b] = [await codex.extractCodexMeta(cxMain), await codex.extractCodexMeta(zst)];
+    if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error('meta differs between plain and zstd');
+    const lines = await codex.readLinesAt(zst, [5]);
+    if (!String(lines.get(5)).includes('Fix the login bug')) throw new Error('readLinesAt on zstd');
+    fs.rmSync(zst);
+  });
+  await check('codex search: only human-readable lines admit a hit', async () => {
+    const head = (o) => JSON.stringify(o).slice(0, 640);
+    const lines = CX_ROLLOUT.split('\n').map((l) => JSON.parse(l));
+    const admitted = lines.map((o) => codex.isSearchableHead(head(o)));
+    // session_meta, task_started, developer, AGENTS user, real user, world_state, turn_context,
+    // reasoning x2, assistant, call, usage x2, token_count, output, call, output, usage,
+    // item echo, compacted, assistant, aborted, unknown
+    const want = [0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1];
+    if (admitted.map(Number).join('') !== want.join('')) throw new Error('admitted: ' + admitted.map(Number).join(''));
+  });
+  await check('codex search end to end: hits come from content, never injected context', async () => {
+    // Fresh process: CODEX_HOME and HOME are read when the modules load.
+    const code = `
+      const { buildIndex } = require(${JSON.stringify(path.join(__dirname, '../lib/scanner'))});
+      const { search } = require(${JSON.stringify(path.join(__dirname, '../lib/search'))});
+      (async () => {
+        const idx = await buildIndex({ entries: {} });
+        const byId = new Map(idx.sessions.map((s) => [s.id, s]));
+        const out = {};
+        for (const q of ['needle-in-output', 'needle-in-subagent', 'needle-in-world-state', 'needle-in-instructions', 'needle-in-echo']) {
+          out[q] = (await search(q, byId, idx.codexOwners)).map((r) => r.sessionId + '|' + r.snippets.map((s) => s.role + '|' + s.uuid).join(','));
+        }
+        console.log(JSON.stringify(out));
+      })();`;
+    const home = path.join(DIR, 'search-home');
+    fs.mkdirSync(home, { recursive: true });
+    const sdir = path.join(home, '.codex', 'sessions', '2026', '10', '01');
+    writeRollout(sdir, CX_ID, CX_ROLLOUT);
+    writeRollout(sdir, CX_SPAWN_ID, cxSub(CX_SPAWN_ID, CX_ID, { subagent: { thread_spawn: { parent_thread_id: CX_ID } } }, 'Ada'));
+    const out = JSON.parse(execFileSync(process.execPath, ['-e', code], { env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, '.codex') } }).toString());
+    const want = {
+      'needle-in-output': [CX_ID + '|tool result|L17'],
+      'needle-in-subagent': [CX_ID + '|subagent · assistant|null'],
+      'needle-in-world-state': [], 'needle-in-instructions': [], 'needle-in-echo': [],
+    };
+    if (JSON.stringify(out) !== JSON.stringify(want)) throw new Error('got ' + JSON.stringify(out));
+  });
   console.log(results.join('\n'));
   console.log(`\n${pass} passed, ${fail} failed`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch {}

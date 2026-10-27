@@ -351,6 +351,7 @@ const SessionCard = React.memo(function SessionCard({ s, active, onSelect }) {
     >
       <div className="title">{s.title || 'Untitled session'}</div>
       <div className="sub">
+        {s.agent === 'codex' && <span className="agent-tag">codex</span>}
         <span>{fmtDate(s.lastTs)}</span>
         <span className="sep">·</span>
         <span className="proj">{(s.projectPath || '').split('/').pop()}</span>
@@ -580,7 +581,7 @@ function Archive({ sessions, indexing, progress, filtered }) {
           {filtered ? ' in this view.' : since ? ` since ${since}.` : '.'}
         </div>
         <div className="archive-sub">
-          Every Claude Code session on this Mac, indexed and searchable.
+          Every Claude Code and Codex session on this Mac, indexed and searchable.
           Select a session to replay it, or press ⌘K to search across all of them.
         </div>
         {indexing && (
@@ -1106,7 +1107,7 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
 
 // ---------- the tape (scrubber) ----------
 
-function Tape({ events, onSeek, scrollFraction, theme }) {
+function Tape({ events, onSeek, scrollFraction, theme, agentName = 'claude' }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const [tip, setTip] = useState(null);
@@ -1219,7 +1220,7 @@ function Tape({ events, onSeek, scrollFraction, theme }) {
       </div>
       <div className="tape-legend">
         <span><span className="dot" style={{ background: 'var(--ev-user)' }} />you</span>
-        <span><span className="dot" style={{ background: 'var(--ev-assistant)' }} />claude</span>
+        <span><span className="dot" style={{ background: 'var(--ev-assistant)' }} />{agentName}</span>
         <span><span className="dot" style={{ background: 'var(--ev-thinking)' }} />thinking</span>
         <span><span className="dot" style={{ background: 'var(--ev-tool)' }} />tools</span>
         <span><span className="dot" style={{ background: 'var(--ev-error)' }} />errors</span>
@@ -1317,7 +1318,7 @@ function EventBlock({ ev, idx }) {
 
 // ---------- session view ----------
 
-function Reel({ events, theme, jumpToUuid, onJumped }) {
+function Reel({ events, theme, jumpToUuid, onJumped, agentName }) {
   const [scrollFraction, setScrollFraction] = useState(0);
   const scrollRef = useRef(null);
   const pinGen = useRef(0);
@@ -1432,7 +1433,7 @@ function Reel({ events, theme, jumpToUuid, onJumped }) {
 
   return (
     <>
-      <Tape events={events} onSeek={seek} scrollFraction={scrollFraction} theme={theme} />
+      <Tape events={events} onSeek={seek} scrollFraction={scrollFraction} theme={theme} agentName={agentName} />
       <div className="transcript" ref={scrollRef} onScroll={onScroll}>
         <div className="transcript-inner">{blocks}</div>
       </div>
@@ -1490,12 +1491,15 @@ function SubagentView({ sessionId, agent, theme, onBack }) {
         <div className="sv-meta" style={{ marginBottom: 6 }}>{back}</div>
         <div className="sv-title">{data.title || agent.title || `subagent ${agent.id.slice(0, 8)}`}</div>
         <div className="sv-meta">
-          <span className="brass">subagent · agent-{agent.id.slice(0, 10)}</span>
+          {agent.agent === 'codex'
+            ? <span className="brass">{agent.kind === 'guardian' ? 'auto-review' : 'subagent'} · {agent.nickname || agent.id.slice(0, 8)}</span>
+            : <span className="brass">subagent · agent-{agent.id.slice(0, 10)}</span>}
           {agent.workflow && <span>{agent.workflow}</span>}
+          {agent.role && <span>{agent.role}</span>}
           <span>{data.events.length} events</span>
         </div>
       </div>
-      <Reel events={data.events} theme={theme} />
+      <Reel events={data.events} theme={theme} agentName={agent.agent === 'codex' ? 'codex' : 'claude'} />
     </div>
   );
 }
@@ -1532,8 +1536,10 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
     return () => { alive = false; };
   }, []);
 
+  // Each agent resumes through its own CLI, so each has its own template.
+  const tplKey = data && data.meta && data.meta.agent === 'codex' ? 'codexResumeTemplate' : 'resumeTemplate';
   const saveTpl = () => {
-    api.saveSettings({ resumeTemplate: tplDraft }).then((s) => {
+    api.saveSettings({ [tplKey]: tplDraft }).then((s) => {
       setSettings(s);
       // A failed write leaves the editor open holding the draft, rather than
       // closing as if the template had been saved.
@@ -1582,6 +1588,8 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
   }
 
   const m = data.meta;
+  const agentName = m.agent === 'codex' ? 'codex' : 'claude';
+  const template = settings && settings[tplKey];
   const models = Object.keys(m.models).map(modelShort).join(', ');
   const dur = m.firstTs && m.lastTs ? fmtDuration(m.lastTs - m.firstTs) : '';
   const cost = sessionCost(m);
@@ -1593,6 +1601,7 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
         <div className="sv-title">{m.title || 'Untitled session'}</div>
         <div className="sv-meta">
           <span className="chip">{fmtDate(m.firstTs)} {fmtTime(m.firstTs)}</span>
+          {m.agent === 'codex' && <span className="agent-tag">codex</span>}
           {dur && <span>{dur}</span>}
           <span className="brass">{models}</span>
           <span>{m.userTurns} prompts</span>
@@ -1612,14 +1621,14 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
               <CopyChip
                 className="reveal"
                 label="resume"
-                value={buildResumeCmd(settings.resumeTemplate, m.cwd, sessionId)}
-                title={'copy: ' + buildResumeCmd(settings.resumeTemplate, m.cwd, sessionId)}
+                value={buildResumeCmd(template, m.cwd, sessionId)}
+                title={'copy: ' + buildResumeCmd(template, m.cwd, sessionId)}
               />
               <span
                 className="reveal"
                 title="edit the resume command template"
                 onClick={() => {
-                  setTplDraft(settings.resumeTemplate);
+                  setTplDraft(template);
                   setSaveErr(false);
                   setEditingTpl((v) => !v);
                 }}
@@ -1643,7 +1652,7 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
               onKeyDown={(e) => { if (e.key === 'Enter') saveTpl(); if (e.key === 'Escape') setEditingTpl(false); }}
             />
             <span className="reveal" onClick={saveTpl}>save</span>
-            <span className="reveal" onClick={() => setTplDraft(settings.resumeTemplateDefault)}>reset</span>
+            <span className="reveal" onClick={() => setTplDraft(settings[tplKey + 'Default'])}>reset</span>
             <span className="re-hint">
               {saveErr
                 ? 'could not write settings, the template was not saved'
@@ -1663,7 +1672,7 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
           </div>
         )}
       </div>
-      <Reel events={data.events} theme={theme} jumpToUuid={effectiveJump}
+      <Reel events={data.events} theme={theme} jumpToUuid={effectiveJump} agentName={agentName}
         onJumped={(u) => { jumpedRef.current = u; }} />
     </div>
   );

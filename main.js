@@ -2,11 +2,12 @@ const { app, BrowserWindow, ipcMain, shell, nativeTheme, nativeImage } = require
 const path = require('path');
 const fs = require('fs');
 const { PROJECTS_DIR, buildIndex, parseSession, listSubagents } = require('./lib/scanner');
+const { CODEX_SESSION_DIRS, CODEX_INDEX_FILE, parseCodexSession } = require('./lib/codex');
 const { search } = require('./lib/search');
 const { exportSession } = require('./lib/export');
 
 let win = null;
-let index = { projects: [], sessions: [], skillInventory: [] };
+let index = { projects: [], sessions: [], skillInventory: [], codexChildren: new Map(), codexOwners: new Map() };
 let sessionsById = new Map();
 let indexing = false;
 
@@ -69,11 +70,18 @@ async function refreshIndex() {
     // is open would never reach the renderer on a quiet rescan. Kept over
     // JSON.stringify(index), which re-stringified the whole shipped index
     // every rescan and held the result in memory for the life of the app.
+    // Codex thread names live in session_index.jsonl, not the rollout, so a
+    // rename moves the title without touching any signed file: sign titles.
+    // Codex subagent rollouts fold into their root session's usage without
+    // touching the root's file, so they get their own term too: a deleted
+    // or archived child must still ping.
     const sig = index.sessions
-      .map((s) => s.filePath + ':' + s.mtime + ':' + s.size)
+      .map((s) => s.filePath + ':' + s.mtime + ':' + s.size + ':' + s.title)
       .sort()
       .join('|')
-      + '#' + (index.skillInventory || []).map((i) => i.source + ':' + i.name).join('|');
+      + '#' + (index.skillInventory || []).map((i) => i.source + ':' + i.name).join('|')
+      + '#' + [...(index.codexChildren || new Map()).values()].flat()
+        .map((c) => c.filePath + ':' + c.mtime + ':' + c.size).sort().join('|');
     const changed = sig !== lastIndexSig;
     lastIndexSig = sig;
     // sentProgress keeps a visible progress bar from sticking; lastParsed
@@ -98,7 +106,12 @@ function readTheme() {
 }
 
 const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
-const { RESUME_TEMPLATE_DEFAULT, TEMPLATE_MAX } = require('./lib/resume');
+const { RESUME_TEMPLATE_DEFAULT, CODEX_RESUME_TEMPLATE_DEFAULT, TEMPLATE_MAX } = require('./lib/resume');
+// settings key -> its default; each agent has its own resume command
+const TEMPLATE_DEFAULTS = {
+  resumeTemplate: RESUME_TEMPLATE_DEFAULT,
+  codexResumeTemplate: CODEX_RESUME_TEMPLATE_DEFAULT,
+};
 let settingsCache = null;
 
 function readSettings() {
@@ -108,10 +121,13 @@ function readSettings() {
     // a hand-edited file can hold valid JSON that is not an object
     if (!settingsCache || typeof settingsCache !== 'object' || Array.isArray(settingsCache)) settingsCache = {};
   }
+  const tpl = (key) => (typeof settingsCache[key] === 'string' && settingsCache[key].trim()
+    ? settingsCache[key] : TEMPLATE_DEFAULTS[key]);
   return {
-    resumeTemplate: typeof settingsCache.resumeTemplate === 'string' && settingsCache.resumeTemplate.trim()
-      ? settingsCache.resumeTemplate : RESUME_TEMPLATE_DEFAULT,
+    resumeTemplate: tpl('resumeTemplate'),
     resumeTemplateDefault: RESUME_TEMPLATE_DEFAULT,
+    codexResumeTemplate: tpl('codexResumeTemplate'),
+    codexResumeTemplateDefault: CODEX_RESUME_TEMPLATE_DEFAULT,
     templateMax: TEMPLATE_MAX,
   };
 }
@@ -142,17 +158,44 @@ function createWindow() {
   });
 }
 
-// Live index: re-scan (cheap, mtime-cached) when Claude Code writes new
-// transcript lines, so sessions appear while you work. Debounced hard because
-// active sessions append constantly.
+// Live index: re-scan (cheap, mtime-cached) when Claude Code or Codex writes
+// new transcript lines, so sessions appear while you work. Debounced hard
+// because active sessions append constantly. Only the transcript dirs are
+// watched: the rest of ~/.codex holds databases that are written nonstop.
 let watchTimer = null;
+const watched = new Set();
+function onTranscriptChange() {
+  clearTimeout(watchTimer);
+  watchTimer = setTimeout(() => refreshIndex(), 5000);
+}
+// A target that does not exist yet (Codex never run, no thread renamed yet)
+// gets its watcher on a later pass, and its arrival triggers a rescan.
 function watchProjects() {
-  try {
-    fs.watch(PROJECTS_DIR, { recursive: true }, () => {
-      clearTimeout(watchTimer);
-      watchTimer = setTimeout(() => refreshIndex(), 5000);
-    });
-  } catch {}
+  let added = false;
+  for (const target of [PROJECTS_DIR, ...CODEX_SESSION_DIRS, CODEX_INDEX_FILE]) {
+    if (watched.has(target)) continue;
+    try {
+      fs.watch(target, { recursive: target !== CODEX_INDEX_FILE }, onTranscriptChange);
+      watched.add(target);
+      added = true;
+    } catch {}
+  }
+  return added;
+}
+
+const isCodex = (s) => s.agent === 'codex';
+
+// Codex subagent threads were found at index time; Claude's are listed
+// from the session's own directory on demand.
+async function subagentsOf(s) {
+  return isCodex(s) ? (index.codexChildren.get(s.id) || []) : listSubagents(s.filePath);
+}
+
+async function parseAny(s, opts = {}) {
+  if (!isCodex(s)) return parseSession(s.filePath, opts);
+  const parsed = await parseCodexSession(s.filePath);
+  if (!opts.skipSubagents) parsed.subagents = await subagentsOf(s);
+  return parsed;
 }
 
 app.whenReady().then(() => {
@@ -166,6 +209,7 @@ app.whenReady().then(() => {
   createWindow();
   refreshIndex();
   watchProjects();
+  setInterval(() => { if (watchProjects()) onTranscriptChange(); }, 60000);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -193,7 +237,7 @@ ipcMain.handle('session:read', async (_e, id) => {
   const s = sessionsById.get(id);
   if (!s) return null;
   try {
-    const parsed = await parseSession(s.filePath);
+    const parsed = await parseAny(s);
     return { meta: s, ...parsed };
   } catch (err) {
     return { meta: s, events: [], sidechainCount: 0, abandonedCount: 0, error: String(err && err.message || err) };
@@ -201,7 +245,7 @@ ipcMain.handle('session:read', async (_e, id) => {
 });
 
 ipcMain.handle('search:query', async (_e, q) => {
-  try { return await search(q, sessionsById); } catch { return []; }
+  try { return await search(q, sessionsById, index.codexOwners); } catch { return []; }
 });
 
 ipcMain.handle('shell:revealSession', (_e, id) => {
@@ -211,12 +255,16 @@ ipcMain.handle('shell:revealSession', (_e, id) => {
 
 ipcMain.handle('session:readSub', async (_e, { id, agentId }) => {
   const s = sessionsById.get(id);
-  if (!s || !/^[a-z0-9]+$/.test(String(agentId))) return null;
-  const subs = await listSubagents(s.filePath);
+  // Claude agent ids are short hex; Codex subagents are thread uuids
+  const idOk = isCodex(s || {}) ? /^[0-9a-f-]{36}$/ : /^[a-z0-9]+$/;
+  if (!s || !idOk.test(String(agentId))) return null;
+  const subs = await subagentsOf(s);
   const sub = subs.find((x) => x.id === agentId);
   if (!sub) return null;
   try {
-    const parsed = await parseSession(sub.filePath, { includeSidechain: true, skipSubagents: true });
+    const parsed = isCodex(s)
+      ? await parseCodexSession(sub.filePath)
+      : await parseSession(sub.filePath, { includeSidechain: true, skipSubagents: true });
     return { title: sub.title, ...parsed };
   } catch (err) {
     return { title: sub.title, events: [], sidechainCount: 0, abandonedCount: 0, subagents: [], error: String(err && err.message || err) };
@@ -227,7 +275,7 @@ ipcMain.handle('session:export', async (_e, { id, format }) => {
   const s = sessionsById.get(id);
   if (!s || !['md', 'html'].includes(format)) return null;
   try {
-    const parsed = await parseSession(s.filePath, { skipSubagents: true });
+    const parsed = await parseAny(s, { skipSubagents: true });
     const { filename, content } = exportSession({ ...s }, parsed.events, format);
     const dir = path.join(app.getPath('downloads'), 'Hindcast Exports');
     fs.mkdirSync(dir, { recursive: true });
@@ -248,15 +296,16 @@ ipcMain.handle('settings:save', (_e, s) => {
   // while the app is running is not clobbered by this write.
   settingsCache = null;
   readSettings();
-  if (Object.prototype.hasOwnProperty.call(s, 'resumeTemplate')) {
-    const t = typeof s.resumeTemplate === 'string' ? s.resumeTemplate.trim() : '';
+  for (const [key, def] of Object.entries(TEMPLATE_DEFAULTS)) {
+    if (!Object.prototype.hasOwnProperty.call(s, key)) continue;
+    const t = typeof s[key] === 'string' ? s[key].trim() : '';
     // The editor input caps at TEMPLATE_MAX, so over-length only arrives from
     // outside the UI; refuse it rather than truncating mid-placeholder.
-    if (t.length > TEMPLATE_MAX) return { ...readSettings(), saveFailed: true };
+    if (t.length > TEMPLATE_MAX) { settingsCache = null; return { ...readSettings(), saveFailed: true }; }
     // A cleared or default-valued template is stored as absent, so future
     // default changes reach users who never customized it.
-    if (t && t !== RESUME_TEMPLATE_DEFAULT) settingsCache.resumeTemplate = t;
-    else delete settingsCache.resumeTemplate;
+    if (t && t !== def) settingsCache[key] = t;
+    else delete settingsCache[key];
   }
   // Report what actually persisted: on a write failure the caller must not be
   // told the new value is saved, or the UI shows it until the next launch.
