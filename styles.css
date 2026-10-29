@@ -386,6 +386,19 @@ body {
 }
 .session-card .sub .proj { color: var(--brass-dim); }
 .session-card .sub .sep { opacity: 0.5; }
+.agent-tag {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--putty-dim);
+  border: 1px solid var(--line-soft);
+  border-radius: 99px;
+  padding: 0 5px;
+  line-height: 1.6;
+  flex: none;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.result .agent-tag { margin-right: 8px; }
 
 /* ─────────────────── right: main stage ─────────────────── */
 

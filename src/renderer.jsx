@@ -251,7 +251,10 @@ function Dropdown({ label, active, open, setOpen, children }) {
   );
 }
 
-function FilterBar({ dateFilter, setDateFilter, modelFilter, setModelFilter, modelOptions }) {
+function FilterBar({
+  dateFilter, setDateFilter, modelFilter, setModelFilter, modelOptions,
+  showAgentFilter, agentFilter, setAgentFilter, agentOptions,
+}) {
   const [openWhich, setOpenWhich] = useState(null);
 
   const dateActive = dateFilter.preset !== 'all';
@@ -272,6 +275,13 @@ function FilterBar({ dateFilter, setDateFilter, modelFilter, setModelFilter, mod
     : modelFilter.size === 1
       ? modelShort([...modelFilter][0])
       : `${modelFilter.size} models`;
+
+  const agentActive = agentFilter && agentFilter.size > 0;
+  const agentLabel = !agentActive
+    ? 'Agent'
+    : agentFilter.size === 1
+      ? [...agentFilter][0]
+      : `${agentFilter.size} agents`;
 
   return (
     <div className="filter-row">
@@ -337,13 +347,43 @@ function FilterBar({ dateFilter, setDateFilter, modelFilter, setModelFilter, mod
           </div>
         )}
       </Dropdown>
+      {showAgentFilter && (
+        <Dropdown
+          label={agentLabel} active={agentActive}
+          open={openWhich === 'agent'} setOpen={(v) => setOpenWhich(v ? 'agent' : null)}
+        >
+          {(agentOptions || []).map(({ id, count }) => {
+            const on = agentFilter.has(id);
+            return (
+              <div
+                key={id}
+                className={'dd-item' + (on ? ' on' : '')}
+                onClick={() => {
+                  const next = new Set(agentFilter);
+                  if (on) next.delete(id); else next.add(id);
+                  setAgentFilter(next);
+                }}
+              >
+                <span className="dd-check">{on ? '✓' : '○'}</span>
+                <span className="dd-name">{id}</span>
+                <span className="dd-count">{count}</span>
+              </div>
+            );
+          })}
+          {agentActive && (
+            <div className="dd-item dd-clear" onClick={() => setAgentFilter(new Set())}>
+              <span className="dd-check" />Clear
+            </div>
+          )}
+        </Dropdown>
+      )}
     </div>
   );
 }
 
 // ---------- session list ----------
 
-const SessionCard = React.memo(function SessionCard({ s, active, onSelect }) {
+const SessionCard = React.memo(function SessionCard({ s, active, onSelect, showAgent }) {
   return (
     <div
       className={'session-card' + (active ? ' active' : '')}
@@ -351,6 +391,7 @@ const SessionCard = React.memo(function SessionCard({ s, active, onSelect }) {
     >
       <div className="title">{s.title || 'Untitled session'}</div>
       <div className="sub">
+        {showAgent && <span className="agent-tag">{s.agent || 'claude'}</span>}
         <span>{fmtDate(s.lastTs)}</span>
         <span className="sep">·</span>
         <span className="proj">{(s.projectPath || '').split('/').pop()}</span>
@@ -375,7 +416,7 @@ const SessionCard = React.memo(function SessionCard({ s, active, onSelect }) {
 // Off-screen layout/paint cost is already covered by the cards'
 // content-visibility:auto, which handles variable heights natively.
 const SessionListBody = React.memo(function SessionListBody({
-  shown, selectedId, onSelect, deferredFilter, anyFilter, onClearFilters, onSearchTranscripts,
+  shown, selectedId, onSelect, deferredFilter, anyFilter, onClearFilters, onSearchTranscripts, showAgent,
 }) {
   const listRef = useRef(null);
 
@@ -406,13 +447,13 @@ const SessionListBody = React.memo(function SessionListBody({
         </div>
       )}
       {shown.map((s) => (
-        <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} />
+        <SessionCard key={s.id} s={s} active={s.id === selectedId} onSelect={onSelect} showAgent={showAgent} />
       ))}
     </div>
   );
 });
 
-function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, anyFilter, onClearFilters, onSearchTranscripts }) {
+function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, anyFilter, onClearFilters, onSearchTranscripts, showAgent }) {
   // The query lives here, not in App: a keystroke re-renders this list only,
   // never the rail or the stage. The deferred value lets the input echo
   // instantly while the filtered list catches up a frame later.
@@ -457,6 +498,7 @@ function SessionList({ sessions, selectedId, onSelect, projectName, filterBar, a
           deferredFilter={deferredFilter}
           anyFilter={anyFilter}
           onClearFilters={onClearFilters}
+          showAgent={showAgent}
           onSearchTranscripts={onSearchTranscripts}
         />
       </div>
@@ -541,7 +583,24 @@ function BarList({ items, color }) {
   );
 }
 
-function Archive({ sessions, indexing, progress, filtered }) {
+const AGENT_BLURB = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok' };
+const AGENT_ORDER = ['claude', 'codex', 'grok'];
+
+function archiveBlurb(agents) {
+  const present = AGENT_ORDER.filter((a) => agents && agents.has(a));
+  if (present.length === 0 || (present.length === 1 && present[0] === 'claude')) {
+    return 'Every Claude Code session on this Mac, indexed and searchable.';
+  }
+  const words = present.map((a) => AGENT_BLURB[a]);
+  const list = words.length === 1
+    ? words[0]
+    : words.length === 2
+      ? words.join(' and ')
+      : words.slice(0, -1).join(', ') + ', and ' + words[words.length - 1];
+  return `Every ${list} session on this Mac, indexed and searchable.`;
+}
+
+function Archive({ sessions, indexing, progress, filtered, agents, skippedZstd }) {
   const stats = useMemo(() => {
     let tokensOut = 0, tokensIn = 0, cacheRead = 0, toolCalls = 0, userTurns = 0;
     const models = {}, tools = {};
@@ -580,9 +639,14 @@ function Archive({ sessions, indexing, progress, filtered }) {
           {filtered ? ' in this view.' : since ? ` since ${since}.` : '.'}
         </div>
         <div className="archive-sub">
-          Every Claude Code session on this Mac, indexed and searchable.
-          Select a session to replay it, or press ⌘K to search across all of them.
+          {archiveBlurb(agents)}
+          {' '}Select a session to replay it, or press ⌘K to search across all of them.
         </div>
+        {skippedZstd > 0 && (
+          <div className="archive-sub">
+            {skippedZstd.toLocaleString()} compressed Codex transcript{skippedZstd === 1 ? ' was' : 's were'} skipped because zstd is not installed.
+          </div>
+        )}
         {indexing && (
           <div className="indexing-note">
             indexing… {progress ? `${progress.done} / ${progress.total}` : ''}
@@ -830,7 +894,7 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
 
 // ---------- the skills (inventory & firings) ----------
 
-function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInventory, onOpenSession }) {
+function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInventory, onOpenSession, showAgent }) {
   const [openSkill, setOpenSkill] = useState(null); // name of the one expanded row, or null
   const dayOk = dayInRange || (() => true);
   const skillAll = allSessions || scopeSessions;
@@ -963,7 +1027,7 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
   return (
     <div className="archive">
       <div className="archive-hero">
-        <div className="archive-eyebrow">The Skills</div>
+        <div className="archive-eyebrow">{showAgent ? 'Claude skills' : 'The Skills'}</div>
         <div className="archive-title">
           {st.installed > 0 && st.neverFired > 0 ? (
             <>Of <em>{st.installed}</em> installed skills, <em>{st.neverFired}</em> {st.neverFired === 1 ? 'has' : 'have'} never fired.</>
@@ -1106,7 +1170,7 @@ function Skills({ scopeSessions, allSessions, dayInRange, dateFilter, skillInven
 
 // ---------- the tape (scrubber) ----------
 
-function Tape({ events, onSeek, scrollFraction, theme }) {
+function Tape({ events, onSeek, scrollFraction, theme, agentName }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const [tip, setTip] = useState(null);
@@ -1219,7 +1283,7 @@ function Tape({ events, onSeek, scrollFraction, theme }) {
       </div>
       <div className="tape-legend">
         <span><span className="dot" style={{ background: 'var(--ev-user)' }} />you</span>
-        <span><span className="dot" style={{ background: 'var(--ev-assistant)' }} />claude</span>
+        <span><span className="dot" style={{ background: 'var(--ev-assistant)' }} />{agentName || 'claude'}</span>
         <span><span className="dot" style={{ background: 'var(--ev-thinking)' }} />thinking</span>
         <span><span className="dot" style={{ background: 'var(--ev-tool)' }} />tools</span>
         <span><span className="dot" style={{ background: 'var(--ev-error)' }} />errors</span>
@@ -1317,7 +1381,7 @@ function EventBlock({ ev, idx }) {
 
 // ---------- session view ----------
 
-function Reel({ events, theme, jumpToUuid, onJumped }) {
+function Reel({ events, theme, jumpToUuid, onJumped, agentName }) {
   const [scrollFraction, setScrollFraction] = useState(0);
   const scrollRef = useRef(null);
   const pinGen = useRef(0);
@@ -1432,7 +1496,7 @@ function Reel({ events, theme, jumpToUuid, onJumped }) {
 
   return (
     <>
-      <Tape events={events} onSeek={seek} scrollFraction={scrollFraction} theme={theme} />
+      <Tape events={events} onSeek={seek} scrollFraction={scrollFraction} theme={theme} agentName={agentName} />
       <div className="transcript" ref={scrollRef} onScroll={onScroll}>
         <div className="transcript-inner">{blocks}</div>
       </div>
@@ -1495,7 +1559,7 @@ function SubagentView({ sessionId, agent, theme, onBack }) {
           <span>{data.events.length} events</span>
         </div>
       </div>
-      <Reel events={data.events} theme={theme} />
+      <Reel events={data.events} theme={theme} agentName={agent.agent || 'claude'} />
     </div>
   );
 }
@@ -1516,7 +1580,7 @@ function CopyChip({ label, value, title, className = 'copy-chip' }) {
   );
 }
 
-function SessionView({ sessionId, jumpToUuid, theme }) {
+function SessionView({ sessionId, jumpToUuid, theme, showAgent }) {
   const [data, setData] = useState(null);
   const [openAgent, setOpenAgent] = useState(null);
   const [exportState, setExportState] = useState(null); // 'md' | 'html' while in flight
@@ -1532,8 +1596,12 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
     return () => { alive = false; };
   }, []);
 
+  const agentName = (data && data.meta && data.meta.agent) || 'claude';
+  const tplKey = agentName === 'codex' ? 'codexResumeTemplate'
+    : agentName === 'grok' ? 'grokResumeTemplate' : 'resumeTemplate';
+
   const saveTpl = () => {
-    api.saveSettings({ resumeTemplate: tplDraft }).then((s) => {
+    api.saveSettings({ [tplKey]: tplDraft }).then((s) => {
       setSettings(s);
       // A failed write leaves the editor open holding the draft, rather than
       // closing as if the template had been saved.
@@ -1592,6 +1660,7 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
       <div className="sv-head">
         <div className="sv-title">{m.title || 'Untitled session'}</div>
         <div className="sv-meta">
+          {showAgent && <span className="agent-tag">{m.agent || 'claude'}</span>}
           <span className="chip">{fmtDate(m.firstTs)} {fmtTime(m.firstTs)}</span>
           {dur && <span>{dur}</span>}
           <span className="brass">{models}</span>
@@ -1612,14 +1681,14 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
               <CopyChip
                 className="reveal"
                 label="resume"
-                value={buildResumeCmd(settings.resumeTemplate, m.cwd, sessionId)}
-                title={'copy: ' + buildResumeCmd(settings.resumeTemplate, m.cwd, sessionId)}
+                value={buildResumeCmd(settings[tplKey], m.cwd, sessionId)}
+                title={'copy: ' + buildResumeCmd(settings[tplKey], m.cwd, sessionId)}
               />
               <span
                 className="reveal"
                 title="edit the resume command template"
                 onClick={() => {
-                  setTplDraft(settings.resumeTemplate);
+                  setTplDraft(settings[tplKey]);
                   setSaveErr(false);
                   setEditingTpl((v) => !v);
                 }}
@@ -1643,7 +1712,7 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
               onKeyDown={(e) => { if (e.key === 'Enter') saveTpl(); if (e.key === 'Escape') setEditingTpl(false); }}
             />
             <span className="reveal" onClick={saveTpl}>save</span>
-            <span className="reveal" onClick={() => setTplDraft(settings.resumeTemplateDefault)}>reset</span>
+            <span className="reveal" onClick={() => setTplDraft(settings[tplKey + 'Default'])}>reset</span>
             <span className="re-hint">
               {saveErr
                 ? 'could not write settings, the template was not saved'
@@ -1664,6 +1733,7 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
         )}
       </div>
       <Reel events={data.events} theme={theme} jumpToUuid={effectiveJump}
+        agentName={m.agent || 'claude'}
         onJumped={(u) => { jumpedRef.current = u; }} />
     </div>
   );
@@ -1671,7 +1741,7 @@ function SessionView({ sessionId, jumpToUuid, theme }) {
 
 // ---------- search overlay ----------
 
-function SearchOverlay({ sessions, onClose, onOpenSession, initialQuery }) {
+function SearchOverlay({ sessions, onClose, onOpenSession, initialQuery, showAgent }) {
   const [q, setQ] = useState(initialQuery || '');
   const [results, setResults] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1737,7 +1807,10 @@ function SearchOverlay({ sessions, onClose, onOpenSession, initialQuery }) {
                 onClick={() => onOpenSession(s, r.snippets[0]?.uuid)}
               >
                 <div className="r-title">{s.title || 'Untitled session'}</div>
-                <div className="r-meta">{fmtDate(s.lastTs)} · {(s.projectPath || '').split('/').pop()}</div>
+                <div className="r-meta">
+                  {showAgent && <span className="agent-tag">{s.agent || 'claude'}</span>}
+                  {fmtDate(s.lastTs)} · {(s.projectPath || '').split('/').pop()}
+                </div>
                 {r.snippets.map((sn, i) => (
                   <div className="r-snip" key={i}>
                     <span className="role">{sn.role}</span> {highlight(sn.snippet)}
@@ -1812,8 +1885,12 @@ function mergeIndex(prev, next) {
     // filePath too: a transcript relocated with mtime/size intact (project dir
     // re-encode, restore from another machine) must not keep the old path or
     // its project attribution alive.
+    const pa = p && (p.subagents || []), na = s.subagents || [];
+    const sameSubs = p && pa.length === na.length &&
+      pa.every((a, n) => na[n] && a.id === na[n].id && a.filePath === na[n].filePath);
     if (p && p.mtime === s.mtime && p.size === s.size && p.filePath === s.filePath &&
         p.title === s.title && p.lastTs === s.lastTs && p.toolCalls === s.toolCalls &&
+        (p.agent || 'claude') === (s.agent || 'claude') && sameSubs &&
         sameTokens(p.tokens, s.tokens) && sameSkills(p, s)) {
       if (prev.sessions[i] !== p) sessionsSame = false;
       return p;
@@ -1838,17 +1915,20 @@ function mergeIndex(prev, next) {
   const pi = prev.skillInventory || [], ni = next.skillInventory || [];
   const invSame = pi.length === ni.length &&
     ni.every((it, i) => pi[i] && pi[i].name === it.name && pi[i].source === it.source);
-  if (sessionsSame && projectsSame && invSame && prev.indexing === next.indexing) return prev;
+  const skippedZstd = next.skippedZstd || 0;
+  if (sessionsSame && projectsSame && invSame && prev.indexing === next.indexing &&
+      (prev.skippedZstd || 0) === skippedZstd) return prev;
   return {
     projects: projectsSame ? prev.projects : projects,
     sessions: sessionsSame ? prev.sessions : sessions,
     skillInventory: invSame ? pi : ni,
+    skippedZstd,
     indexing: next.indexing,
   };
 }
 
 function App() {
-  const [index, setIndex] = useState({ projects: [], sessions: [], skillInventory: [], indexing: true });
+  const [index, setIndex] = useState({ projects: [], sessions: [], skillInventory: [], skippedZstd: 0, indexing: true });
   const [progress, setProgress] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
@@ -1858,6 +1938,7 @@ function App() {
   const [view, setView] = useState('archive'); // 'archive' | 'ledger' | 'skills'
   const [dateFilter, setDateFilter] = useState({ preset: 'all', from: null, to: null });
   const [modelFilter, setModelFilter] = useState(new Set());
+  const [agentFilter, setAgentFilter] = useState(new Set());
   const [themePref, setThemePref] = useState(() => localStorage.getItem('hindcast-theme') || 'auto');
   const [resolvedTheme, setResolvedTheme] = useState(() => document.documentElement.dataset.theme || 'dark');
 
@@ -1920,14 +2001,39 @@ function App() {
     return index.sessions.filter((s) => s.project === selectedProject);
   }, [index.sessions, selectedProject]);
 
-  // Faceted pipeline: project scope → date filter → model filter.
+  const agentsPresent = useMemo(() => {
+    const set = new Set();
+    for (const s of index.sessions) set.add(s.agent || 'claude');
+    return set;
+  }, [index.sessions]);
+  const showAgent = agentsPresent.size >= 2;
+  useEffect(() => {
+    if (showAgent) return;
+    setAgentFilter((cur) => (cur.size ? new Set() : cur));
+  }, [showAgent]);
+
+  // Faceted pipeline: project scope → date filter → agent filter → model filter.
+  // Agent counts stay on the date scope, so picking one agent does not zero the others.
   const dateScoped = useMemo(
     () => visibleSessions.filter((s) => sessionPassesDate(s, dateFilter)),
     [visibleSessions, dateFilter, nowTick]
   );
-  const modelOptions = useMemo(() => {
+  const agentOptions = useMemo(() => {
     const counts = new Map();
     for (const s of dateScoped) {
+      const a = s.agent || 'claude';
+      counts.set(a, (counts.get(a) || 0) + 1);
+    }
+    return AGENT_ORDER.filter((id) => agentsPresent.has(id))
+      .map((id) => ({ id, count: counts.get(id) || 0 }));
+  }, [dateScoped, agentsPresent]);
+  const agentScoped = useMemo(() => {
+    if (!agentFilter.size) return dateScoped;
+    return dateScoped.filter((s) => agentFilter.has(s.agent || 'claude'));
+  }, [dateScoped, agentFilter]);
+  const modelOptions = useMemo(() => {
+    const counts = new Map();
+    for (const s of agentScoped) {
       for (const m of Object.keys(s.models)) counts.set(m, (counts.get(m) || 0) + 1);
     }
     const opts = [...counts.entries()]
@@ -1938,13 +2044,13 @@ function App() {
     for (const o of opts) nameCounts[o.name] = (nameCounts[o.name] || 0) + 1;
     for (const o of opts) if (nameCounts[o.name] > 1) o.name = o.id;
     return opts;
-  }, [dateScoped]);
+  }, [agentScoped]);
   const filteredSessions = useMemo(() => {
-    if (!modelFilter.size) return dateScoped;
-    return dateScoped.filter((s) => Object.keys(s.models).some((m) => modelFilter.has(m)));
-  }, [dateScoped, modelFilter]);
+    if (!modelFilter.size) return agentScoped;
+    return agentScoped.filter((s) => Object.keys(s.models).some((m) => modelFilter.has(m)));
+  }, [agentScoped, modelFilter]);
 
-  const anyFilter = dateFilter.preset !== 'all' || modelFilter.size > 0;
+  const anyFilter = dateFilter.preset !== 'all' || modelFilter.size > 0 || agentFilter.size > 0;
 
   // Rail counts follow the active filters (across ALL projects, regardless of
   // the current scope), so the numbers next to each project answer "how many
@@ -1954,16 +2060,18 @@ function App() {
     let total = 0;
     for (const s of index.sessions) {
       if (!sessionPassesDate(s, dateFilter)) continue;
+      if (agentFilter.size && !agentFilter.has(s.agent || 'claude')) continue;
       if (modelFilter.size && !Object.keys(s.models).some((m) => modelFilter.has(m))) continue;
       total++;
       byProject.set(s.project, (byProject.get(s.project) || 0) + 1);
     }
     return { total, byProject };
-  }, [index.sessions, dateFilter, modelFilter, nowTick]);
+  }, [index.sessions, dateFilter, modelFilter, agentFilter, nowTick]);
 
   const clearFilters = () => {
     setDateFilter({ preset: 'all', from: null, to: null });
     setModelFilter(new Set());
+    setAgentFilter(new Set());
   };
 
   // Stable handlers so the memoized Rail and session cards skip re-renders.
@@ -2024,19 +2132,24 @@ function App() {
         projectName={projectName}
         anyFilter={anyFilter}
         onClearFilters={clearFilters}
+        showAgent={showAgent}
         onSearchTranscripts={(q) => { setSearchSeed(q); setSearchOpen(true); }}
         filterBar={
           <FilterBar
             dateFilter={dateFilter} setDateFilter={setDateFilter}
             modelFilter={modelFilter} setModelFilter={setModelFilter}
             modelOptions={modelOptions}
+            showAgentFilter={showAgent}
+            agentFilter={agentFilter}
+            setAgentFilter={setAgentFilter}
+            agentOptions={agentOptions}
           />
         }
       />
       <div className="stage">
-        <Boundary resetKey={[selectedSession || 'none', view, selectedProject || 'all', dateFilter.preset, modelFilter.size].join('|')}>
+        <Boundary resetKey={[selectedSession || 'none', view, selectedProject || 'all', dateFilter.preset, modelFilter.size, agentFilter.size].join('|')}>
           {selectedSession
-            ? <SessionView sessionId={selectedSession} jumpToUuid={jumpToUuid} theme={resolvedTheme} />
+            ? <SessionView sessionId={selectedSession} jumpToUuid={jumpToUuid} theme={resolvedTheme} showAgent={showAgent} />
             : view === 'skills'
               ? <Skills
                   scopeSessions={visibleSessions}
@@ -2045,6 +2158,7 @@ function App() {
                   dateFilter={dateFilter}
                   skillInventory={index.skillInventory || []}
                   onOpenSession={openFromSkills}
+                  showAgent={showAgent}
                 />
             : view === 'ledger'
               ? <Ledger sessions={filteredSessions} dayInRange={dayInRange} modelFilter={modelFilter} />
@@ -2053,6 +2167,8 @@ function App() {
                   indexing={index.indexing || !!progress}
                   progress={progress}
                   filtered={anyFilter}
+                  agents={agentsPresent}
+                  skippedZstd={index.skippedZstd || 0}
                 />}
         </Boundary>
       </div>
@@ -2062,6 +2178,7 @@ function App() {
           initialQuery={searchSeed}
           onClose={() => setSearchOpen(false)}
           onOpenSession={openFromSearch}
+          showAgent={showAgent}
         />
       )}
     </div>

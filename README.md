@@ -16,7 +16,8 @@
   Find that session from three weeks ago, scrub through what the agent did,
   and resume it in your terminal with one paste. Local-first: it reads the
   transcripts Claude Code already writes to <code>~/.claude/projects/</code>,
-  and nothing leaves your Mac.
+  plus Codex transcripts under <code>~/.codex/</code> and Grok transcripts
+  under <code>~/.grok/</code>, and nothing leaves your Mac.
 </p>
 
 <p align="center">
@@ -151,12 +152,13 @@ accent. No neon.
 
 ## Local-only, by construction
 
-Hindcast reads `~/.claude/projects/` and writes to exactly two places, both
-its own: its user-data dir (index cache, theme, settings) and
+Hindcast reads `~/.claude/projects/`, `~/.codex/sessions/`,
+`~/.codex/archived_sessions/`, and `~/.grok/sessions/`, and writes to exactly
+two places, both its own: its user-data dir (index cache, theme, settings) and
 `~/Downloads/Hindcast Exports` when you click export. It never writes into
-`~/.claude/`, makes no network requests of its own, and has no telemetry.
-There is no API key to configure because it never calls Claude: it reads
-files on disk, and that's the whole trick. The 2026 back-and-forth over
+`~/.claude/`, `~/.codex/`, or `~/.grok/`, makes no network requests of its own,
+and has no telemetry. There is no API key to configure because it never calls
+a provider: it reads files on disk, and that's the whole trick. The 2026 back-and-forth over
 subscription auth for third-party agent tools
 ([latest round](https://venturebeat.com/technology/anthropic-reinstates-openclaw-and-third-party-agent-usage-on-claude-subscriptions-with-a-catch))
 never applied to it.

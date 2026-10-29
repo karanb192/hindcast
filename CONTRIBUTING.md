@@ -1,15 +1,15 @@
 # Contributing to Hindcast
 
 Thanks for your interest in Hindcast, a local-first viewer, timeline scrubber,
-and cost tracker for your Claude Code sessions.
+and cost tracker for your Claude Code, Codex, and Grok sessions.
 
 ## Ground rules
 
 Hindcast is, and will stay, **read-only and local-first**. It only ever *reads*
-the transcript files Claude Code already writes to `~/.claude/projects/`. It must
-never send messages, drive sessions, or call the Anthropic API / Agent SDK; that
-boundary is what keeps it safe to use with any Claude Code subscription. Please
-don't propose changes that cross it.
+the transcript files already on disk: Claude Code under `~/.claude/projects/`,
+Codex under `~/.codex/`, and Grok under `~/.grok/sessions/`. It must never send
+messages, drive sessions, or call a provider API; that boundary is what keeps it
+safe to use with any subscription. Please don't propose changes that cross it.
 
 ## Development setup
 
