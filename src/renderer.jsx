@@ -775,8 +775,10 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
     for (const s of sessions) {
       for (const date of Object.keys(s.daily || {})) if (dayOk(date)) activeDays.add(date);
     }
+    // A model with no published price must not become $0. $0 is a price.
+    const anyPriced = models.some((m) => m.cost != null);
     const totals = {
-      cost: models.reduce((a, m) => a + (m.cost || 0), 0),
+      cost: anyPriced ? models.reduce((a, m) => a + (m.cost || 0), 0) : null,
       out: models.reduce((a, m) => a + m.u.out, 0),
       cr: models.reduce((a, m) => a + m.u.cr, 0),
       days: activeDays.size,
@@ -792,16 +794,20 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
     const startKey = start.getFullYear() + '-' +
       String(start.getMonth() + 1).padStart(2, '0') + '-' +
       String(start.getDate()).padStart(2, '0');
-    let sum = 0;
+    let sum = 0, priced = false;
     for (const s of sessions) {
       for (const [date, dayModels] of Object.entries(s.daily || {})) {
         if (date < startKey) continue; // 'YYYY-MM-DD' strings sort chronologically
         for (const [model, u] of Object.entries(dayModels)) {
-          if (modelOk(model)) sum += costOf(model, u) || 0;
+          if (!modelOk(model)) continue;
+          const c = costOf(model, u);
+          if (c == null) continue;
+          priced = true;
+          sum += c;
         }
       }
     }
-    return sum;
+    return priced ? sum : null;
   }, [sessions, modelFilter]);
 
   const maxRowCost = Math.max(...rows.map((r) => r.cost || 0), 0.01);
