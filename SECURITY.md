@@ -1,8 +1,10 @@
 # Security
 
-Hindcast is a local-first app: it reads `~/.claude/projects` on your own
-machine and never sends transcript data anywhere. There is no server, no
-telemetry, and no network dependency beyond checking GitHub for releases.
+Hindcast is a local-first app: it reads `~/.claude/projects`,
+`~/.codex/sessions`, `~/.codex/archived_sessions`, and `~/.grok/sessions`
+on your own machine and never sends transcript data anywhere. There is no
+server, no telemetry, and no network dependency beyond checking GitHub for
+releases.
 
 If you find a vulnerability (for example anything that could make the app
 write outside its own data directory, execute transcript content, or leak

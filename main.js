@@ -4,6 +4,8 @@ const fs = require('fs');
 const { PROJECTS_DIR, buildIndex, parseSession, listSubagents } = require('./lib/scanner');
 const { search } = require('./lib/search');
 const { exportSession } = require('./lib/export');
+const { parseCodexSession, SESSIONS_DIR: CODEX_SESSIONS, ARCHIVED_DIR: CODEX_ARCHIVED, SESSION_ID_RE } = require('./lib/codex');
+const { parseGrokSession, SESSIONS_DIR: GROK_SESSIONS } = require('./lib/grok');
 
 let win = null;
 let index = { projects: [], sessions: [], skillInventory: [] };
@@ -73,7 +75,8 @@ async function refreshIndex() {
       .map((s) => s.filePath + ':' + s.mtime + ':' + s.size)
       .sort()
       .join('|')
-      + '#' + (index.skillInventory || []).map((i) => i.source + ':' + i.name).join('|');
+      + '#' + (index.skillInventory || []).map((i) => i.source + ':' + i.name).join('|')
+      + '#z' + (index.skippedZstd || 0);
     const changed = sig !== lastIndexSig;
     lastIndexSig = sig;
     // sentProgress keeps a visible progress bar from sticking; lastParsed
@@ -98,8 +101,16 @@ function readTheme() {
 }
 
 const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
-const { RESUME_TEMPLATE_DEFAULT, TEMPLATE_MAX } = require('./lib/resume');
+const {
+  RESUME_TEMPLATE_DEFAULT, CODEX_RESUME_TEMPLATE_DEFAULT, GROK_RESUME_TEMPLATE_DEFAULT, TEMPLATE_MAX,
+} = require('./lib/resume');
 let settingsCache = null;
+
+const TEMPLATE_KEYS = {
+  resumeTemplate: RESUME_TEMPLATE_DEFAULT,
+  codexResumeTemplate: CODEX_RESUME_TEMPLATE_DEFAULT,
+  grokResumeTemplate: GROK_RESUME_TEMPLATE_DEFAULT,
+};
 
 function readSettings() {
   if (!settingsCache) {
@@ -108,12 +119,13 @@ function readSettings() {
     // a hand-edited file can hold valid JSON that is not an object
     if (!settingsCache || typeof settingsCache !== 'object' || Array.isArray(settingsCache)) settingsCache = {};
   }
-  return {
-    resumeTemplate: typeof settingsCache.resumeTemplate === 'string' && settingsCache.resumeTemplate.trim()
-      ? settingsCache.resumeTemplate : RESUME_TEMPLATE_DEFAULT,
-    resumeTemplateDefault: RESUME_TEMPLATE_DEFAULT,
-    templateMax: TEMPLATE_MAX,
-  };
+  const out = { templateMax: TEMPLATE_MAX };
+  for (const [key, fallback] of Object.entries(TEMPLATE_KEYS)) {
+    const stored = settingsCache[key];
+    out[key] = typeof stored === 'string' && stored.trim() ? stored : fallback;
+    out[key + 'Default'] = fallback;
+  }
+  return out;
 }
 
 function createWindow() {
@@ -142,17 +154,47 @@ function createWindow() {
   });
 }
 
-// Live index: re-scan (cheap, mtime-cached) when Claude Code writes new
-// transcript lines, so sessions appear while you work. Debounced hard because
-// active sessions append constantly.
+// Live index: re-scan (cheap, mtime-cached) when a transcript is written, so
+// sessions appear while you work. Debounced hard because active sessions
+// append constantly. A directory that is not there yet is tried again: Codex
+// or Grok may be installed after Hindcast is open.
+const WATCH_DIRS = [PROJECTS_DIR, CODEX_SESSIONS, CODEX_ARCHIVED, GROK_SESSIONS];
 let watchTimer = null;
-function watchProjects() {
+let watchRetry = null;
+const watched = new Set();
+
+function armWatch(dir) {
+  if (watched.has(dir)) return true;
   try {
-    fs.watch(PROJECTS_DIR, { recursive: true }, () => {
+    fs.watch(dir, { recursive: true }, () => {
       clearTimeout(watchTimer);
       watchTimer = setTimeout(() => refreshIndex(), 5000);
     });
-  } catch {}
+    watched.add(dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function watchProjects() {
+  for (const dir of WATCH_DIRS) armWatch(dir);
+  if (WATCH_DIRS.every((d) => watched.has(d))) {
+    if (watchRetry) { clearInterval(watchRetry); watchRetry = null; }
+    return;
+  }
+  if (watchRetry) return;
+  watchRetry = setInterval(() => {
+    let appeared = false;
+    for (const dir of WATCH_DIRS) {
+      if (!watched.has(dir) && armWatch(dir)) appeared = true;
+    }
+    if (WATCH_DIRS.every((d) => watched.has(d))) {
+      clearInterval(watchRetry);
+      watchRetry = null;
+    }
+    if (appeared) refreshIndex();
+  }, 60000);
 }
 
 app.whenReady().then(() => {
@@ -183,17 +225,29 @@ ipcMain.handle('index:get', () => {
     projects: index.projects,
     sessions: index.sessions.map((s) => ({ ...s })),
     skillInventory: index.skillInventory || [],
+    skippedZstd: index.skippedZstd || 0,
     indexing,
   };
 });
 
 ipcMain.handle('index:refresh', async () => { await refreshIndex(); return true; });
 
+async function parseFor(s, opts) {
+  const agent = s.agent || 'claude';
+  if (agent === 'codex') {
+    const parsed = await parseCodexSession(s.filePath);
+    if (s.subagents && s.subagents.length) parsed.subagents = s.subagents;
+    return parsed;
+  }
+  if (agent === 'grok') return parseGrokSession(s.filePath);
+  return parseSession(s.filePath, opts);
+}
+
 ipcMain.handle('session:read', async (_e, id) => {
   const s = sessionsById.get(id);
   if (!s) return null;
   try {
-    const parsed = await parseSession(s.filePath);
+    const parsed = await parseFor(s);
     return { meta: s, ...parsed };
   } catch (err) {
     return { meta: s, events: [], sidechainCount: 0, abandonedCount: 0, error: String(err && err.message || err) };
@@ -211,7 +265,20 @@ ipcMain.handle('shell:revealSession', (_e, id) => {
 
 ipcMain.handle('session:readSub', async (_e, { id, agentId }) => {
   const s = sessionsById.get(id);
-  if (!s || !/^[a-z0-9]+$/.test(String(agentId))) return null;
+  if (!s) return null;
+  if ((s.agent || 'claude') === 'codex') {
+    const want = String(agentId || '').toLowerCase();
+    if (!SESSION_ID_RE.test(want)) return null;
+    const sub = (s.subagents || []).find((x) => x.id === want);
+    if (!sub || !sub.filePath) return null;
+    try {
+      const parsed = await parseCodexSession(sub.filePath);
+      return { title: sub.title, ...parsed };
+    } catch (err) {
+      return { title: sub.title, events: [], sidechainCount: 0, abandonedCount: 0, subagents: [], error: String(err && err.message || err) };
+    }
+  }
+  if (!/^[a-z0-9]+$/.test(String(agentId))) return null;
   const subs = await listSubagents(s.filePath);
   const sub = subs.find((x) => x.id === agentId);
   if (!sub) return null;
@@ -227,7 +294,7 @@ ipcMain.handle('session:export', async (_e, { id, format }) => {
   const s = sessionsById.get(id);
   if (!s || !['md', 'html'].includes(format)) return null;
   try {
-    const parsed = await parseSession(s.filePath, { skipSubagents: true });
+    const parsed = await parseFor(s, { skipSubagents: true });
     const { filename, content } = exportSession({ ...s }, parsed.events, format);
     const dir = path.join(app.getPath('downloads'), 'Hindcast Exports');
     fs.mkdirSync(dir, { recursive: true });
@@ -248,15 +315,20 @@ ipcMain.handle('settings:save', (_e, s) => {
   // while the app is running is not clobbered by this write.
   settingsCache = null;
   readSettings();
-  if (Object.prototype.hasOwnProperty.call(s, 'resumeTemplate')) {
-    const t = typeof s.resumeTemplate === 'string' ? s.resumeTemplate.trim() : '';
+  for (const key of Object.keys(TEMPLATE_KEYS)) {
+    if (!Object.prototype.hasOwnProperty.call(s, key)) continue;
+    const t = typeof s[key] === 'string' ? s[key].trim() : '';
     // The editor input caps at TEMPLATE_MAX, so over-length only arrives from
     // outside the UI; refuse it rather than truncating mid-placeholder.
     if (t.length > TEMPLATE_MAX) return { ...readSettings(), saveFailed: true };
+  }
+  for (const [key, fallback] of Object.entries(TEMPLATE_KEYS)) {
+    if (!Object.prototype.hasOwnProperty.call(s, key)) continue;
+    const t = typeof s[key] === 'string' ? s[key].trim() : '';
     // A cleared or default-valued template is stored as absent, so future
     // default changes reach users who never customized it.
-    if (t && t !== RESUME_TEMPLATE_DEFAULT) settingsCache.resumeTemplate = t;
-    else delete settingsCache.resumeTemplate;
+    if (t && t !== fallback) settingsCache[key] = t;
+    else delete settingsCache[key];
   }
   // Report what actually persisted: on a write failure the caller must not be
   // told the new value is saved, or the UI shows it until the next launch.
