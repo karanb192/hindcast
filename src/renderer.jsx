@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallba
 import { createRoot } from 'react-dom/client';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { costOf } from '../lib/pricing.js';
+import { costOf, sumPriced } from '../lib/pricing.js';
 import { buildResumeCmd } from '../lib/resume.js';
 import { BUILTIN_COMMANDS, BUNDLED_SKILLS } from '../lib/builtin-commands.js';
 
@@ -775,10 +775,8 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
     for (const s of sessions) {
       for (const date of Object.keys(s.daily || {})) if (dayOk(date)) activeDays.add(date);
     }
-    // A model with no published price must not become $0. $0 is a price.
-    const anyPriced = models.some((m) => m.cost != null);
     const totals = {
-      cost: anyPriced ? models.reduce((a, m) => a + (m.cost || 0), 0) : null,
+      cost: sumPriced(models.map((m) => m.cost)),
       out: models.reduce((a, m) => a + m.u.out, 0),
       cr: models.reduce((a, m) => a + m.u.cr, 0),
       days: activeDays.size,
@@ -794,20 +792,17 @@ function Ledger({ sessions, dayInRange, modelFilter }) {
     const startKey = start.getFullYear() + '-' +
       String(start.getMonth() + 1).padStart(2, '0') + '-' +
       String(start.getDate()).padStart(2, '0');
-    let sum = 0, priced = false;
+    const costs = [];
     for (const s of sessions) {
       for (const [date, dayModels] of Object.entries(s.daily || {})) {
         if (date < startKey) continue; // 'YYYY-MM-DD' strings sort chronologically
         for (const [model, u] of Object.entries(dayModels)) {
           if (!modelOk(model)) continue;
-          const c = costOf(model, u);
-          if (c == null) continue;
-          priced = true;
-          sum += c;
+          costs.push(costOf(model, u));
         }
       }
     }
-    return priced ? sum : null;
+    return sumPriced(costs);
   }, [sessions, modelFilter]);
 
   const maxRowCost = Math.max(...rows.map((r) => r.cost || 0), 0.01);
@@ -1254,7 +1249,8 @@ function Tape({ events, onSeek, scrollFraction, theme, agentName }) {
     const label = ev.kind === 'tool'
       ? `${ev.toolName} ${ev.toolSummary || ''}`
       : (ev.text || '').slice(0, 60);
-    setTip({ x, kind: ev.kind === 'tool' ? ev.toolName : ev.kind, label, time: fmtTime(ev.ts) });
+    const kind = ev.kind === 'tool' ? ev.toolName : (ev.kind === 'agent' ? (ev.speaker || 'agent') : ev.kind);
+    setTip({ x, kind, label, time: fmtTime(ev.ts) });
   };
 
   const handleMove = (e) => {
@@ -1343,6 +1339,13 @@ function EventBlock({ ev, idx }) {
     case 'assistant':
       return (
         <div className="ev ev-assistant" data-idx={idx} id={'ev-' + idx}>
+          <Markdown text={ev.text} />
+        </div>
+      );
+    case 'agent':
+      return (
+        <div className="ev ev-assistant ev-agent" data-idx={idx} id={'ev-' + idx}>
+          <div className="who">{ev.speaker || 'agent'}</div>
           <Markdown text={ev.text} />
         </div>
       );

@@ -12,6 +12,7 @@ const { grokDisplayText, extractGrokMeta, parseGrokSession } = require('../lib/g
 const { claimSessionIds } = require('../lib/scanner');
 const { search } = require('../lib/search');
 const { exportSession } = require('../lib/export');
+const { sumPriced } = require('../lib/pricing');
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hindcast-agents-'));
 let fail = 0;
@@ -261,7 +262,7 @@ function countLine(ts, lastOut, totalOut) {
       output: [{ type: 'input_text', text: 'from parts' }, { type: 'input_image', image_url: 'data:image/png;base64,aaaa' }],
     }, '2026-03-03T00:00:04.000Z'),
     env('response_item', {
-      type: 'agent_message', author: 'worker',
+      type: 'agent_message', author: '/root/worker', recipient: '/root',
       content: [{ type: 'input_text', text: 'agent said hello' }],
     }, '2026-03-03T00:00:05.000Z'),
     env('response_item', {
@@ -271,7 +272,7 @@ function countLine(ts, lastOut, totalOut) {
   ]);
   const toolMeta = await extractCodexMeta(toolFile);
   check('tool output is not a second tool run', toolMeta.toolCalls === 1, String(toolMeta.toolCalls));
-  check('an agent message counts as assistant text', toolMeta.assistantMsgs === 1, String(toolMeta.assistantMsgs));
+  check('an agent message is not counted as the session reply', toolMeta.assistantMsgs === 0, String(toolMeta.assistantMsgs));
   const toolReel = await parseCodexSession(toolFile);
   const toolEvent = toolReel.events.find((e) => e.kind === 'tool' && e.callId === 'call-1');
   check('codex tool result is attached to its call',
@@ -280,6 +281,15 @@ function countLine(ts, lastOut, totalOut) {
   const orphan = toolReel.events.find((e) => e.kind === 'tool' && e.callId === 'call-missing');
   check('array tool output keeps text and drops images', !!orphan && orphan.result === 'from parts', orphan && orphan.result);
   check('encrypted agent text is not shown', !toolReel.events.some((e) => (e.text || '').includes('hidden') || (e.result || '').includes('hidden')));
+  const agentEv = toolReel.events.find((e) => e.kind === 'agent');
+  check('an agent message keeps its speaker',
+    !!agentEv && agentEv.speaker === 'worker → root' && agentEv.text === 'agent said hello'
+      && !toolReel.events.some((e) => e.kind === 'assistant'),
+    agentEv && agentEv.speaker);
+  const agentExport = exportSession({ title: 'T', agent: 'codex', id, models: {}, firstTs: 0 }, toolReel.events, 'md');
+  check('export names the agent speaker', agentExport.content.includes('**worker → root**') && agentExport.content.includes('agent said hello'));
+  check('an empty ledger stays $0', sumPriced([]) === 0 && sumPriced([0]) === 0);
+  check('an unpriced ledger stays unknown', sumPriced([null]) === null && sumPriced([1.5, null]) === 1.5);
   const toolHits = await search('zztoolneedlephrase', new Map([
     [id, { id, agent: 'codex', title: 'quiet', projectPath: '/tmp/proj', lastTs: 3, filePath: toolFile }],
   ]), 50, { roots: [DIR] });
