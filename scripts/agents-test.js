@@ -266,6 +266,10 @@ function countLine(ts, lastOut, totalOut) {
       content: [{ type: 'input_text', text: 'agent said hello' }],
     }, '2026-03-03T00:00:05.000Z'),
     env('response_item', {
+      type: 'agent_message', author: '/root/a/worker', recipient: '/root/b/worker',
+      content: [{ type: 'input_text', text: 'from the other worker' }],
+    }, '2026-03-03T00:00:05.500Z'),
+    env('response_item', {
       type: 'agent_message',
       content: [{ type: 'encrypted_content', encrypted_content: 'zztoolneedlephrase hidden' }],
     }, '2026-03-03T00:00:06.000Z'),
@@ -286,6 +290,11 @@ function countLine(ts, lastOut, totalOut) {
     !!agentEv && agentEv.speaker === 'worker → root' && agentEv.text === 'agent said hello'
       && !toolReel.events.some((e) => e.kind === 'assistant'),
     agentEv && agentEv.speaker);
+  const otherWorker = toolReel.events.find((e) => e.kind === 'agent' && e.text === 'from the other worker');
+  check('two agents with the same leaf stay distinct', otherWorker && otherWorker.speaker === 'a/worker → b/worker', otherWorker && otherWorker.speaker);
+  const execIdx = toolReel.events.findIndex((e) => e.kind === 'tool' && e.callId === 'call-1');
+  const orphanIdx = toolReel.events.findIndex((e) => e.kind === 'tool' && e.callId === 'call-missing');
+  check('an unmatched result follows the call already open', execIdx >= 0 && orphanIdx > execIdx, `${execIdx} ${orphanIdx}`);
   const agentExport = exportSession({ title: 'T', agent: 'codex', id, models: {}, firstTs: 0 }, toolReel.events, 'md');
   check('export names the agent speaker', agentExport.content.includes('**worker → root**') && agentExport.content.includes('agent said hello'));
   check('an empty ledger stays $0', sumPriced([]) === 0 && sumPriced([0]) === 0);
@@ -304,6 +313,17 @@ function countLine(ts, lastOut, totalOut) {
   const oldMeta = await extractCodexMeta(oldFile);
   const oldReel = await parseCodexSession(oldFile);
   const oldTool = oldReel.events.find((e) => e.kind === 'tool');
+  const emptyFile = write(`rollout-2026-03-04T00-00-00-${id}.jsonl`, [
+    env('session_meta', { id, cwd: '/tmp/proj' }, '2026-03-04T00:00:00.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-empty', arguments: 'true' }, '2026-03-04T00:00:01.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-empty', output: '' }, '2026-03-04T00:00:02.000Z'),
+  ]);
+  const emptyReel = await parseCodexSession(emptyFile);
+  const emptyTool = emptyReel.events.find((e) => e.callId === 'call-empty');
+  check('an empty tool output is a result', !!emptyTool && emptyTool.result === '', JSON.stringify(emptyTool && emptyTool.result));
+  const emptyExport = exportSession({ title: 'T', agent: 'codex', id, models: {}, firstTs: 0 }, emptyReel.events, 'md');
+  check('export keeps an empty tool result', emptyExport.content.includes('(empty)'));
+
   check('a 2025 rollout tool call keeps its result',
     oldMeta.toolCalls === 1 && oldTool && oldTool.toolName === 'shell' && oldTool.result === 'home',
     String(oldMeta.toolCalls));
@@ -320,6 +340,8 @@ function countLine(ts, lastOut, totalOut) {
   fs.writeFileSync(path.join(grokToolDir, 'usage.json'), JSON.stringify({ session: {} }));
   const grokChat = [
     { type: 'user', content: [{ type: 'text', text: 'please run it' }] },
+    { type: 'assistant', synthetic_reason: 'startup', content: 'synthetic says hi', tool_calls: [{ id: 'syn', name: 'hidden_tool', arguments: 'nope' }] },
+    { type: 'tool_result', synthetic_reason: 'startup', tool_call_id: 'syn', content: 'synthetic out' },
     { type: 'assistant', content: '', tool_calls: [{ id: 't1', name: 'run_terminal_command', arguments: 'zzgrokcmd' }] },
     { type: 'tool_result', tool_call_id: 't1', content: 'zzgrokout' },
   ].map((o) => JSON.stringify(o)).join('\n');
@@ -344,6 +366,18 @@ function countLine(ts, lastOut, totalOut) {
       && grokTool.result === 'zzgrokout');
   check('a grok command is searchable text',
     grokDisplayText({ type: 'assistant', content: '', tool_calls: [{ name: 'run_terminal_command', arguments: 'zzgrokcmd' }] }).text.includes('zzgrokcmd'));
+  check('a synthetic grok line stays off the reel',
+    !grokReel.events.some((e) => (e.text || '').includes('synthetic') || e.toolName === 'hidden_tool'));
+  fs.appendFileSync(path.join(grokToolDir, 'chat_history.jsonl'),
+    '\n{"type":"tool_result","tool_call_id":"t1","content":"' + 'x'.repeat(2_000_100) + '"}\n');
+  const grokBig = await extractGrokMeta({
+    id, dir: grokToolDir,
+    chatPath: path.join(grokToolDir, 'chat_history.jsonl'),
+    summaryPath: path.join(grokToolDir, 'summary.json'),
+    usagePath: path.join(grokToolDir, 'usage.json'),
+    project: '-tmp-proj', projectPath: '/tmp/proj',
+  });
+  check('an oversized result is not a second run', grokBig.toolCalls === 1, String(grokBig.toolCalls));
 
   if (fail) process.exit(1);
 })().catch((err) => { console.error(err); process.exit(1); });
