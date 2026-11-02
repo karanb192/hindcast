@@ -700,6 +700,10 @@ tr.skill-detail td { padding: 0 10px 10px 27px; }
 }
 .ev-user .body { white-space: pre-wrap; color: var(--ink); font-size: 13px; }
 
+.ev-agent .who {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
+  color: var(--putty); text-transform: uppercase; margin-bottom: 5px;
+}
 .ev-assistant .body { color: var(--ink-dim); font-size: 13px; }
 .ev-assistant .body > * + * { margin-top: 0.7em; }
 .ev-assistant h1, .ev-assistant h2, .ev-assistant h3 {

@@ -6,12 +6,14 @@ const os = require('os');
 const path = require('path');
 const { CODEX_RESUME_TEMPLATE_DEFAULT, GROK_RESUME_TEMPLATE_DEFAULT, buildResumeCmd } = require('../lib/resume');
 const {
-  acceptSessionId, codexDisplayText, extractCodexMeta, assembleCodexSessions, projectKeyFromCwd,
+  acceptSessionId, codexDisplayText, extractCodexMeta, parseCodexSession, assembleCodexSessions, projectKeyFromCwd,
 } = require('../lib/codex');
-const { grokDisplayText, extractGrokMeta } = require('../lib/grok');
+const { grokDisplayText, extractGrokMeta, parseGrokSession } = require('../lib/grok');
 const { claimSessionIds } = require('../lib/scanner');
 const { search } = require('../lib/search');
 const { exportSession } = require('../lib/export');
+const { sumPriced } = require('../lib/pricing');
+const { forEachLine } = require('../lib/lines');
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hindcast-agents-'));
 let fail = 0;
@@ -250,6 +252,191 @@ function countLine(ts, lastOut, totalOut) {
   const snip = hit && hit.snippets.map((s) => s.snippet).join(' ');
   check('a visible line still matches after hidden hits', !!hit && snip.includes('visible') && !snip.includes('hidden'), snip);
   check('encrypted-only codex text is not a hit', !hits.some((h) => h.sessionId === onlyId));
+
+  const toolFile = write(`rollout-2026-03-03T00-00-00-${id}.jsonl`, [
+    env('session_meta', { id, cwd: '/tmp/proj' }, '2026-03-03T00:00:00.000Z'),
+    env('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'run the check' }] }, '2026-03-03T00:00:01.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-1', arguments: '{"cmd":"ls"}' }, '2026-03-03T00:00:02.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-1', output: 'zztoolneedlephrase ok' }, '2026-03-03T00:00:03.000Z'),
+    env('response_item', {
+      type: 'custom_tool_call_output', call_id: 'call-missing',
+      output: [{ type: 'input_text', text: 'from parts' }, { type: 'input_image', image_url: 'data:image/png;base64,aaaa' }],
+    }, '2026-03-03T00:00:04.000Z'),
+    env('response_item', {
+      type: 'agent_message', author: '/root/worker', recipient: '/root',
+      content: [{ type: 'input_text', text: 'agent said hello' }],
+    }, '2026-03-03T00:00:05.000Z'),
+    env('response_item', {
+      type: 'agent_message', author: '/root/a/worker', recipient: '/root/b/worker',
+      content: [{ type: 'input_text', text: 'from the other worker' }],
+    }, '2026-03-03T00:00:05.500Z'),
+    env('response_item', {
+      type: 'agent_message',
+      content: [{ type: 'encrypted_content', encrypted_content: 'zztoolneedlephrase hidden' }],
+    }, '2026-03-03T00:00:06.000Z'),
+  ]);
+  const toolMeta = await extractCodexMeta(toolFile);
+  check('tool output is not a second tool run', toolMeta.toolCalls === 1, String(toolMeta.toolCalls));
+  check('an agent message is not counted as the session reply', toolMeta.assistantMsgs === 0, String(toolMeta.assistantMsgs));
+  const toolReel = await parseCodexSession(toolFile);
+  const toolEvent = toolReel.events.find((e) => e.kind === 'tool' && e.callId === 'call-1');
+  check('codex tool result is attached to its call',
+    !!toolEvent && toolEvent.toolName === 'exec' && toolEvent.result === 'zztoolneedlephrase ok' && toolEvent.input.includes('ls'),
+    JSON.stringify(toolEvent && { name: toolEvent.toolName, result: toolEvent.result }));
+  const orphan = toolReel.events.find((e) => e.kind === 'tool' && e.callId === 'call-missing');
+  check('array tool output keeps text and drops images', !!orphan && orphan.result === 'from parts', orphan && orphan.result);
+  check('encrypted agent text is not shown', !toolReel.events.some((e) => (e.text || '').includes('hidden') || (e.result || '').includes('hidden')));
+  const agentEv = toolReel.events.find((e) => e.kind === 'agent');
+  check('an agent message keeps its speaker',
+    !!agentEv && agentEv.speaker === 'worker → root' && agentEv.text === 'agent said hello'
+      && !toolReel.events.some((e) => e.kind === 'assistant'),
+    agentEv && agentEv.speaker);
+  const otherWorker = toolReel.events.find((e) => e.kind === 'agent' && e.text === 'from the other worker');
+  check('two agents with the same leaf stay distinct', otherWorker && otherWorker.speaker === 'a/worker → b/worker', otherWorker && otherWorker.speaker);
+  const execIdx = toolReel.events.findIndex((e) => e.kind === 'tool' && e.callId === 'call-1');
+  const orphanIdx = toolReel.events.findIndex((e) => e.kind === 'tool' && e.callId === 'call-missing');
+  check('an unmatched result follows the call already open', execIdx >= 0 && orphanIdx > execIdx, `${execIdx} ${orphanIdx}`);
+  const agentExport = exportSession({ title: 'T', agent: 'codex', id, models: {}, firstTs: 0 }, toolReel.events, 'md');
+  check('export names the agent speaker', agentExport.content.includes('**worker → root**') && agentExport.content.includes('agent said hello'));
+  check('an empty ledger stays $0', sumPriced([]) === 0 && sumPriced([0]) === 0);
+  check('an unpriced ledger stays unknown', sumPriced([null]) === null && sumPriced([1.5, null]) === 1.5);
+  const toolHits = await search('zztoolneedlephrase', new Map([
+    [id, { id, agent: 'codex', title: 'quiet', projectPath: '/tmp/proj', lastTs: 3, filePath: toolFile }],
+  ]), 50, { roots: [DIR] });
+  const toolSnip = (toolHits.find((h) => h.sessionId === id) || { snippets: [] }).snippets.map((s) => s.snippet).join(' ');
+  check('codex tool output is searchable', toolSnip.includes('ok') && !toolSnip.includes('hidden'), toolSnip);
+
+  const oldFile = write(`rollout-2025-06-01T00-00-00-${UUID2}.jsonl`, [
+    { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'old prompt' }] },
+    { type: 'function_call', name: 'shell', call_id: 'old-1', arguments: 'pwd' },
+    { type: 'function_call_output', call_id: 'old-1', output: 'home' },
+  ]);
+  const oldMeta = await extractCodexMeta(oldFile);
+  const oldReel = await parseCodexSession(oldFile);
+  const oldTool = oldReel.events.find((e) => e.kind === 'tool');
+  const emptyFile = write(`rollout-2026-03-04T00-00-00-${id}.jsonl`, [
+    env('session_meta', { id, cwd: '/tmp/proj' }, '2026-03-04T00:00:00.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-empty', arguments: 'true' }, '2026-03-04T00:00:01.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-empty', output: '' }, '2026-03-04T00:00:02.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-arr', arguments: 'true' }, '2026-03-04T00:00:03.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-arr', output: [] }, '2026-03-04T00:00:04.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-part', arguments: 'true' }, '2026-03-04T00:00:05.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-part', output: [{ type: 'input_text', text: '' }] }, '2026-03-04T00:00:06.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-obj', arguments: 'true' }, '2026-03-04T00:00:07.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-obj', output: { text: '' } }, '2026-03-04T00:00:08.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-img', arguments: 'true' }, '2026-03-04T00:00:09.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-img', output: [{ type: 'input_image', image_url: 'data:image/png;base64,aaaa' }] }, '2026-03-04T00:00:10.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-none', arguments: 'true' }, '2026-03-04T00:00:11.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-none', output: null }, '2026-03-04T00:00:12.000Z'),
+  ]);
+  const emptyReel = await parseCodexSession(emptyFile);
+  const byCall = (callId) => emptyReel.events.find((e) => e.callId === callId);
+  const emptyTool = byCall('call-empty');
+  check('an empty tool output is a result', !!emptyTool && emptyTool.result === '', JSON.stringify(emptyTool && emptyTool.result));
+  check('an empty output container is a result',
+    ['call-arr', 'call-part', 'call-obj', 'call-img'].every((cid) => byCall(cid) && byCall(cid).result === ''),
+    ['call-arr', 'call-part', 'call-obj', 'call-img'].map((cid) => byCall(cid) && byCall(cid).result).join(','));
+  check('a missing tool output is not a result', byCall('call-none') && byCall('call-none').result === null);
+  const emptyExport = exportSession({ title: 'T', agent: 'codex', id, models: {}, firstTs: 0 }, emptyReel.events, 'md');
+  check('export keeps an empty tool result', emptyExport.content.includes('(empty)'));
+  const imageEv = [{
+    kind: 'tool', toolName: 'look', toolSummary: '', input: '{}', result: '',
+    resultImages: [{ mediaType: 'image/png', data: 'aaaa' }],
+  }];
+  const imageMeta = { title: 'T', agent: 'claude', id, models: {}, firstTs: 0 };
+  const imageMd = exportSession(imageMeta, imageEv, 'md');
+  const imageHtml = exportSession(imageMeta, imageEv, 'html');
+  check('an image result is not labeled empty',
+    !imageMd.content.includes('(empty)') && imageMd.content.includes('1 image')
+      && !imageHtml.content.includes('(empty)') && imageHtml.content.includes('<img'));
+
+  check('a 2025 rollout tool call keeps its result',
+    oldMeta.toolCalls === 1 && oldTool && oldTool.toolName === 'shell' && oldTool.result === 'home',
+    String(oldMeta.toolCalls));
+
+  const longSummary = 'g'.repeat(180);
+  const grokToolDir = path.join(DIR, 'grok-tools', id);
+  fs.mkdirSync(grokToolDir, { recursive: true });
+  fs.writeFileSync(path.join(grokToolDir, 'summary.json'), JSON.stringify({
+    info: { id, cwd: '/tmp/proj' },
+    session_summary: longSummary,
+    created_at: '2026-02-02T00:00:00.000Z',
+    updated_at: '2026-02-02T01:00:00.000Z',
+  }));
+  fs.writeFileSync(path.join(grokToolDir, 'usage.json'), JSON.stringify({ session: {} }));
+  const grokChat = [
+    { type: 'user', content: [{ type: 'text', text: 'please run it' }] },
+    { type: 'assistant', synthetic_reason: 'startup', content: 'synthetic says hi', tool_calls: [{ id: 'syn', name: 'hidden_tool', arguments: 'nope' }] },
+    { type: 'tool_result', synthetic_reason: 'startup', tool_call_id: 'syn', content: 'synthetic out' },
+    { type: 'assistant', content: '', tool_calls: [{ id: 't1', name: 'run_terminal_command', arguments: 'zzgrokcmd' }] },
+    { type: 'tool_result', tool_call_id: 't1', content: 'zzgrokout' },
+  ].map((o) => JSON.stringify(o)).join('\n');
+  fs.writeFileSync(path.join(grokToolDir, 'chat_history.jsonl'), grokChat);
+  const grokToolMeta = await extractGrokMeta({
+    id, dir: grokToolDir,
+    chatPath: path.join(grokToolDir, 'chat_history.jsonl'),
+    summaryPath: path.join(grokToolDir, 'summary.json'),
+    usagePath: path.join(grokToolDir, 'usage.json'),
+    project: '-tmp-proj', projectPath: '/tmp/proj',
+  });
+  check('a grok tool call is one run under its own name',
+    grokToolMeta.toolCalls === 1 && grokToolMeta.tools.run_terminal_command === 1,
+    JSON.stringify(grokToolMeta.tools));
+  check('a long grok summary is cut to the card width', grokToolMeta.title.length === 140, String(grokToolMeta.title.length));
+  const grokReel = await parseGrokSession(path.join(grokToolDir, 'chat_history.jsonl'));
+  const grokTool = grokReel.events.find((e) => e.kind === 'tool');
+  check('grok tool name, command, and result share one event',
+    grokReel.events.filter((e) => e.kind === 'tool').length === 1
+      && grokTool.toolName === 'run_terminal_command'
+      && grokTool.input === 'zzgrokcmd'
+      && grokTool.result === 'zzgrokout');
+  check('a grok command is searchable text',
+    grokDisplayText({ type: 'assistant', content: '', tool_calls: [{ name: 'run_terminal_command', arguments: 'zzgrokcmd' }] }).text.includes('zzgrokcmd'));
+  check('a synthetic grok line stays off the reel',
+    !grokReel.events.some((e) => (e.text || '').includes('synthetic') || e.toolName === 'hidden_tool'));
+  fs.appendFileSync(path.join(grokToolDir, 'chat_history.jsonl'),
+    '\n{"type":"tool_result","tool_call_id":"t1","content":"' + 'x'.repeat(2_000_100) + '"}\n');
+  const grokBig = await extractGrokMeta({
+    id, dir: grokToolDir,
+    chatPath: path.join(grokToolDir, 'chat_history.jsonl'),
+    summaryPath: path.join(grokToolDir, 'summary.json'),
+    usagePath: path.join(grokToolDir, 'usage.json'),
+    project: '-tmp-proj', projectPath: '/tmp/proj',
+  });
+  check('an oversized result is not a second run', grokBig.toolCalls === 1, String(grokBig.toolCalls));
+  fs.appendFileSync(path.join(grokToolDir, 'chat_history.jsonl'),
+    '\n' + JSON.stringify({
+      type: 'assistant',
+      content: 'synthetic_reason is only a word here ' + 'y'.repeat(2_000_100),
+    }) + '\n' + JSON.stringify({
+      type: 'assistant',
+      synthetic_reason: 'startup',
+      content: 'z'.repeat(2_000_100),
+    }) + '\n' + JSON.stringify({ type: 'tool_result', tool_call_id: 'missing', content: '' }) + '\n');
+  const grokHuge = await extractGrokMeta({
+    id, dir: grokToolDir,
+    chatPath: path.join(grokToolDir, 'chat_history.jsonl'),
+    summaryPath: path.join(grokToolDir, 'summary.json'),
+    usagePath: path.join(grokToolDir, 'usage.json'),
+    project: '-tmp-proj', projectPath: '/tmp/proj',
+  });
+  check('a huge line is counted from its fields',
+    grokHuge.assistantMsgs === 1 && grokHuge.toolCalls === 2,
+    JSON.stringify({ a: grokHuge.assistantMsgs, t: grokHuge.toolCalls }));
+  const grokHugeReel = await parseGrokSession(path.join(grokToolDir, 'chat_history.jsonl'));
+  const grokEmpty = grokHugeReel.events.find((e) => e.kind === 'tool' && e.callId === 'missing');
+  const hugeText = grokHugeReel.events.map((e) => e.text || '').join('\n');
+  check('a huge real line stays on the reel and a synthetic one does not',
+    hugeText.includes('only a word here') && !hugeText.includes('zzzzzzzzzz'));
+  check('an empty grok result still shows', !!grokEmpty && grokEmpty.result === '', JSON.stringify(grokEmpty && grokEmpty.result));
+
+  const splitFile = path.join(DIR, 'split-char.jsonl');
+  fs.writeFileSync(splitFile, 'hi 😀 there\nend 😀');
+  const splitLines = [];
+  await forEachLine(splitFile, (line) => { splitLines.push(line); }, { highWaterMark: 3 });
+  check('a character split across reads stays whole',
+    splitLines.length === 2 && splitLines[0] === 'hi 😀 there' && splitLines[1] === 'end 😀',
+    JSON.stringify(splitLines));
 
   if (fail) process.exit(1);
 })().catch((err) => { console.error(err); process.exit(1); });
