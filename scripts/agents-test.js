@@ -317,12 +317,37 @@ function countLine(ts, lastOut, totalOut) {
     env('session_meta', { id, cwd: '/tmp/proj' }, '2026-03-04T00:00:00.000Z'),
     env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-empty', arguments: 'true' }, '2026-03-04T00:00:01.000Z'),
     env('response_item', { type: 'function_call_output', call_id: 'call-empty', output: '' }, '2026-03-04T00:00:02.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-arr', arguments: 'true' }, '2026-03-04T00:00:03.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-arr', output: [] }, '2026-03-04T00:00:04.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-part', arguments: 'true' }, '2026-03-04T00:00:05.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-part', output: [{ type: 'input_text', text: '' }] }, '2026-03-04T00:00:06.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-obj', arguments: 'true' }, '2026-03-04T00:00:07.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-obj', output: { text: '' } }, '2026-03-04T00:00:08.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-img', arguments: 'true' }, '2026-03-04T00:00:09.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-img', output: [{ type: 'input_image', image_url: 'data:image/png;base64,aaaa' }] }, '2026-03-04T00:00:10.000Z'),
+    env('response_item', { type: 'function_call', name: 'exec', call_id: 'call-none', arguments: 'true' }, '2026-03-04T00:00:11.000Z'),
+    env('response_item', { type: 'function_call_output', call_id: 'call-none', output: null }, '2026-03-04T00:00:12.000Z'),
   ]);
   const emptyReel = await parseCodexSession(emptyFile);
-  const emptyTool = emptyReel.events.find((e) => e.callId === 'call-empty');
+  const byCall = (callId) => emptyReel.events.find((e) => e.callId === callId);
+  const emptyTool = byCall('call-empty');
   check('an empty tool output is a result', !!emptyTool && emptyTool.result === '', JSON.stringify(emptyTool && emptyTool.result));
+  check('an empty output container is a result',
+    ['call-arr', 'call-part', 'call-obj', 'call-img'].every((cid) => byCall(cid) && byCall(cid).result === ''),
+    ['call-arr', 'call-part', 'call-obj', 'call-img'].map((cid) => byCall(cid) && byCall(cid).result).join(','));
+  check('a missing tool output is not a result', byCall('call-none') && byCall('call-none').result === null);
   const emptyExport = exportSession({ title: 'T', agent: 'codex', id, models: {}, firstTs: 0 }, emptyReel.events, 'md');
   check('export keeps an empty tool result', emptyExport.content.includes('(empty)'));
+  const imageEv = [{
+    kind: 'tool', toolName: 'look', toolSummary: '', input: '{}', result: '',
+    resultImages: [{ mediaType: 'image/png', data: 'aaaa' }],
+  }];
+  const imageMeta = { title: 'T', agent: 'claude', id, models: {}, firstTs: 0 };
+  const imageMd = exportSession(imageMeta, imageEv, 'md');
+  const imageHtml = exportSession(imageMeta, imageEv, 'html');
+  check('an image result is not labeled empty',
+    !imageMd.content.includes('(empty)') && imageMd.content.includes('1 image')
+      && !imageHtml.content.includes('(empty)') && imageHtml.content.includes('<img'));
 
   check('a 2025 rollout tool call keeps its result',
     oldMeta.toolCalls === 1 && oldTool && oldTool.toolName === 'shell' && oldTool.result === 'home',
@@ -378,6 +403,31 @@ function countLine(ts, lastOut, totalOut) {
     project: '-tmp-proj', projectPath: '/tmp/proj',
   });
   check('an oversized result is not a second run', grokBig.toolCalls === 1, String(grokBig.toolCalls));
+  fs.appendFileSync(path.join(grokToolDir, 'chat_history.jsonl'),
+    '\n' + JSON.stringify({
+      type: 'assistant',
+      content: 'synthetic_reason is only a word here ' + 'y'.repeat(2_000_100),
+    }) + '\n' + JSON.stringify({
+      type: 'assistant',
+      synthetic_reason: 'startup',
+      content: 'z'.repeat(2_000_100),
+    }) + '\n' + JSON.stringify({ type: 'tool_result', tool_call_id: 'missing', content: '' }) + '\n');
+  const grokHuge = await extractGrokMeta({
+    id, dir: grokToolDir,
+    chatPath: path.join(grokToolDir, 'chat_history.jsonl'),
+    summaryPath: path.join(grokToolDir, 'summary.json'),
+    usagePath: path.join(grokToolDir, 'usage.json'),
+    project: '-tmp-proj', projectPath: '/tmp/proj',
+  });
+  check('a huge line is counted from its fields',
+    grokHuge.assistantMsgs === 1 && grokHuge.toolCalls === 2,
+    JSON.stringify({ a: grokHuge.assistantMsgs, t: grokHuge.toolCalls }));
+  const grokHugeReel = await parseGrokSession(path.join(grokToolDir, 'chat_history.jsonl'));
+  const grokEmpty = grokHugeReel.events.find((e) => e.kind === 'tool' && e.callId === 'missing');
+  const hugeText = grokHugeReel.events.map((e) => e.text || '').join('\n');
+  check('a huge real line stays on the reel and a synthetic one does not',
+    hugeText.includes('only a word here') && !hugeText.includes('zzzzzzzzzz'));
+  check('an empty grok result still shows', !!grokEmpty && grokEmpty.result === '', JSON.stringify(grokEmpty && grokEmpty.result));
 
   if (fail) process.exit(1);
 })().catch((err) => { console.error(err); process.exit(1); });
