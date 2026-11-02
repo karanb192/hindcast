@@ -13,6 +13,7 @@ const { claimSessionIds } = require('../lib/scanner');
 const { search } = require('../lib/search');
 const { exportSession } = require('../lib/export');
 const { sumPriced } = require('../lib/pricing');
+const { forEachLine } = require('../lib/lines');
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hindcast-agents-'));
 let fail = 0;
@@ -428,6 +429,14 @@ function countLine(ts, lastOut, totalOut) {
   check('a huge real line stays on the reel and a synthetic one does not',
     hugeText.includes('only a word here') && !hugeText.includes('zzzzzzzzzz'));
   check('an empty grok result still shows', !!grokEmpty && grokEmpty.result === '', JSON.stringify(grokEmpty && grokEmpty.result));
+
+  const splitFile = path.join(DIR, 'split-char.jsonl');
+  fs.writeFileSync(splitFile, 'hi 😀 there\nend 😀');
+  const splitLines = [];
+  await forEachLine(splitFile, (line) => { splitLines.push(line); }, { highWaterMark: 3 });
+  check('a character split across reads stays whole',
+    splitLines.length === 2 && splitLines[0] === 'hi 😀 there' && splitLines[1] === 'end 😀',
+    JSON.stringify(splitLines));
 
   if (fail) process.exit(1);
 })().catch((err) => { console.error(err); process.exit(1); });
